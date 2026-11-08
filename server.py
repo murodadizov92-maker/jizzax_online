@@ -51,8 +51,8 @@ CREATE TABLE IF NOT EXISTS users(
   tg_id INTEGER PRIMARY KEY, name TEXT, username TEXT, region TEXT,
   created INTEGER, last_seen INTEGER);
 CREATE TABLE IF NOT EXISTS clients(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, phone TEXT, region TEXT,
-  address TEXT, search TEXT, UNIQUE(name, phone));
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ext_id TEXT UNIQUE, name TEXT, phone TEXT, region TEXT,
+  address TEXT, agent TEXT DEFAULT '', search TEXT);
 CREATE INDEX IF NOT EXISTS idx_clients_region ON clients(region);
 CREATE TABLE IF NOT EXISTS orders(
   id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT,
@@ -329,7 +329,7 @@ async def h_regions(request):
 
 async def h_clients(request):
     region = request.query.get("region", "").strip()
-    sql, args = "SELECT id,name,phone,region,address FROM clients WHERE 1=1", []
+    sql, args = "SELECT id,name,phone,region,address,agent FROM clients WHERE 1=1", []
     if region:
         sql += " AND region=?"
         args.append(region)
@@ -359,31 +359,41 @@ async def h_clients_import(request):
         return web.json_response({"error": "fayl bo'sh"}, status=400)
     head = [str(c or "").strip().lower() for c in rows[0]]
 
-    def col(*keys):
+    def col(keys, skip=("ид", "id", "код")):
         for i, h in enumerate(head):
-            if any(k in h for k in keys):
+            if any(k in h for k in keys) and not any(h == x or h.startswith(x + " ") for x in skip):
                 return i
         return None
 
-    i_name = col("name", "nom", "клиент", "контрагент", "mijoz", "наименование")
-    i_phone = col("phone", "tel", "тел", "raqam")
-    i_reg = col("region", "hudud", "shahar", "tuman", "район", "город", "регион")
-    i_addr = col("address", "manzil", "адрес")
+    i_ext = next((i for i, h in enumerate(head) if h in ("ид клиента", "id клиента", "id", "ид", "код клиента")), None)
+    i_name = col(("название", "наименование", "name", "nom", "mijoz", "клиент", "контрагент"))
+    i_phone = col(("phone", "tel", "тел", "raqam"))
+    i_reg = col(("территор", "region", "hudud", "shahar", "tuman", "район", "город", "регион"))
+    i_addr = col(("address", "manzil", "адрес"))
+    i_agent = col(("агент", "agent"))
     if i_name is None:
-        return web.json_response({"error": "Ustun topilmadi: 'Nom' (yoki Клиент) ustuni kerak"}, status=400)
+        return web.json_response({"error": "Ustun topilmadi: 'Название клиента' (yoki Nom) ustuni kerak"}, status=400)
+
+    def clean_agent(v):  # "Жабборов Самариддин (Пахтакор)(Вс)" -> "Жабборов Самариддин"
+        return str(v or "").split("(")[0].strip()
+
+    def cell(r, i):
+        return str(r[i] or "").strip() if i is not None and i < len(r) else ""
+
     added = 0
     for r in rows[1:]:
-        name = str(r[i_name] or "").strip()
+        name = cell(r, i_name)
         if not name:
             continue
-        phone = str(r[i_phone] or "").strip() if i_phone is not None else ""
-        region = str(r[i_reg] or "").strip() if i_reg is not None else ""
-        addr = str(r[i_addr] or "").strip() if i_addr is not None else ""
-        search = norm(f"{name} {phone} {region} {addr}")
+        ext = cell(r, i_ext) or name
+        phone, region, addr = cell(r, i_phone), cell(r, i_reg), cell(r, i_addr)
+        agent = clean_agent(cell(r, i_agent))
+        search = norm(f"{name} {phone} {region} {addr} {agent}")
         db.execute(
-            "INSERT INTO clients(name,phone,region,address,search) VALUES(?,?,?,?,?) "
-            "ON CONFLICT(name,phone) DO UPDATE SET region=excluded.region,address=excluded.address,search=excluded.search",
-            (name, phone, region, addr, search),
+            "INSERT INTO clients(ext_id,name,phone,region,address,agent,search) VALUES(?,?,?,?,?,?,?) "
+            "ON CONFLICT(ext_id) DO UPDATE SET name=excluded.name,phone=excluded.phone,region=excluded.region,"
+            "address=excluded.address,agent=excluded.agent,search=excluded.search",
+            (ext, name, phone, region, addr, agent, search),
         )
         added += 1
     db.commit()
@@ -398,8 +408,8 @@ async def h_client_add(request):
         return web.json_response({"error": "nom kerak"}, status=400)
     phone, region, addr = (str(b.get(k, "")).strip() for k in ("phone", "region", "address"))
     db.execute(
-        "INSERT OR REPLACE INTO clients(name,phone,region,address,search) VALUES(?,?,?,?,?)",
-        (name, phone, region, addr, norm(f"{name} {phone} {region} {addr}")),
+        "INSERT OR REPLACE INTO clients(ext_id,name,phone,region,address,search) VALUES(?,?,?,?,?,?)",
+        (f"manual:{name}", name, phone, region, addr, norm(f"{name} {phone} {region} {addr}")),
     )
     db.commit()
     return web.json_response({"ok": True})
