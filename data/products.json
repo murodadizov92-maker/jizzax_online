@@ -1,0 +1,7 @@
+{"products":[
+{"id":"1","name":"Doktorskaya kolbasa","price":68000,"category":"Kolbasa","unit":"kg"},
+{"id":"2","name":"Sosiska sutli","price":54000,"category":"Sosiska","unit":"kg"},
+{"id":"3","name":"Mol go'shti (lahm)","price":98000,"category":"Go'sht","unit":"kg"},
+{"id":"4","name":"Tovuq filesi","price":42000,"category":"Go'sht","unit":"kg"},
+{"id":"5","name":"Salami","price":82000,"category":"Kolbasa","unit":"kg"}
+]}
