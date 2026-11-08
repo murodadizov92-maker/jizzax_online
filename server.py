@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -28,6 +29,7 @@ ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split("
 CHAT_ID = os.getenv("CHAT_ID", "")            # zakas guruhi ID (masalan -1001234567890)
 TOPIC_ID = os.getenv("TOPIC_ID", "")          # "Жиззах онлайн закас" topik ID
 APP_LINK = os.getenv("APP_LINK", "")          # https://t.me/<bot>/<app>  (guruhdagi tugma uchun)
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()  # zakas bot bilan BIR XIL Supabase bazasi (faqat o'qiladi)
 PRODUCTS_URL = os.getenv("PRODUCTS_URL", "")  # zakas bot'ning mahsulot API manzili
 PRODUCTS_TOKEN = os.getenv("PRODUCTS_TOKEN", "")  # kerak bo'lsa (Bearer)
 DB_PATH = os.getenv("DB_PATH", str(BASE / "data" / "online.db"))
@@ -196,7 +198,7 @@ def map_products(raw) -> list:
             img = urljoin(PRODUCTS_URL, str(img))
         out.append({
             "id": str(_pick(p, "id", "product_id", "code", "sku", default=i)),
-            "name": str(name),
+            "name": re.sub(r"\s*\*[^*]*\*\s*$", "", re.sub(r"\s{2,}", " ", str(name))).strip() or str(name),
             "price": _num(_pick(p, "price", "narx", "cost", "цена", default=0)),
             "image": img or "",
             "category": str(_pick(p, "category", "kategoriya", "cat", "group", default="Boshqa")),
@@ -206,11 +208,30 @@ def map_products(raw) -> list:
     return [p for p in out if p["active"]]
 
 
+_pg = {"pool": None}
+
+
+async def fetch_db_products() -> list:
+    """Zakas bot bazasidagi products jadvalidan (narx, rasm, kategoriya) to'g'ridan-to'g'ri o'qiydi."""
+    import asyncpg
+    if _pg["pool"] is None:
+        _pg["pool"] = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2, statement_cache_size=0, command_timeout=15)
+    async with _pg["pool"].acquire() as c:
+        rows = await c.fetch("select id,name,price,category,image_url from products where active order by sort,id")
+    return map_products([{"id": r["id"], "name": r["name"], "price": r["price"], "category": r["category"],
+                          "image": r["image_url"] or ""} for r in rows])
+
+
 async def get_products(force=False) -> list:
     if not force and _cache["items"] and now() - _cache["t"] < 45:
         return _cache["items"]
     items = []
-    if PRODUCTS_URL:
+    if DATABASE_URL:                       # 1) asosiy manba: zakas bot bazasi
+        try:
+            items = await fetch_db_products()
+        except Exception as e:
+            log.warning("DB products sync failed: %s", e)
+    if not items and PRODUCTS_URL:         # 2) zaxira: HTTP manzil
         try:
             headers = {"Authorization": f"Bearer {PRODUCTS_TOKEN}"} if PRODUCTS_TOKEN else {}
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
@@ -219,7 +240,7 @@ async def get_products(force=False) -> list:
                     items = map_products(await r.json(content_type=None))
         except Exception as e:
             log.warning("products sync failed: %s", e)
-    if not items:
+    if not items:                          # 3) oxirgi zaxira: fayl
         f = BASE / "data" / "products.json"
         if f.exists():
             items = map_products(json.loads(f.read_text("utf-8")))

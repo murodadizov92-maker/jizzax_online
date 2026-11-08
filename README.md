@@ -26,3 +26,7 @@ Hudud (masalan "Paxtakor shahar") bo'yicha chip-filtr; tanlangan hudud eslab qol
 Bot guruhda admin bo'lsin (xabarni pin qilish va o'chirish huquqi bilan).
 Topikda ADMIN_IDS dagi odam `/panel` yozsa: bot tugmali xabarni yuboradi, pin qiladi va buyruqni o'chiradi.
 Topikka oddiy a'zolar yozolmasligi uchun: topikni tahrirlab "faqat adminlar yozadi" qiling.
+
+## Mahsulotlar (zakas bot bilan sinxron)
+Render → Environment: `DATABASE_URL` = zakas bot servisidagi AYNAN SHU nom/qiymat (Supabase bazasi). Ilova faqat o'qiydi (select).
+Narx/rasm/kategoriya zakas bot admin panelida o'zgarsa, ~45 soniyada bu yerda ham yangilanadi.
