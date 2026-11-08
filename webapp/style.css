@@ -173,8 +173,8 @@ body.booting #dock{transform:translateX(-50%) translateY(200%)}
 }
 
 /* ---------- mahsulot reklamasi (to'liq ekran) ---------- */
-#ad{position:fixed;inset:0;z-index:130;background:#000;opacity:0;transition:opacity .35s}
+#ad{position:fixed;inset:0;z-index:130;background:#f3e9e2;opacity:0;transition:opacity .35s}
 #ad.on{opacity:1}
 #ad canvas{width:100%;height:100%;display:block}
-.ad-x{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(0,0,0,.45);color:#fff;font-size:18px}
+.ad-x{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.7);color:#2a1810;font-size:18px}
 .ad-bar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(18px + env(safe-area-inset-bottom))}
