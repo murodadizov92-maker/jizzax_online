@@ -42,8 +42,9 @@ function ripple(e, btn) {
   btn.appendChild(s); setTimeout(() => s.remove(), 650);
 }
 document.addEventListener('pointerdown', e => { const b = e.target.closest('.btn,.add'); if (b) ripple(e, b); }, { passive: true });
-function bindTilt(card) {                        // 3D qiyshayish + yaltirash
-  if (REDUCE) return;
+const CAN_TILT = matchMedia('(hover: hover) and (pointer: fine)').matches;
+function bindTilt(card) {                        // 3D qiyshayish (faqat kompyuterda)
+  if (REDUCE || !CAN_TILT) return;
   card.addEventListener('pointermove', e => {
     const r = card.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
     card.classList.add('tilt');
@@ -77,7 +78,7 @@ function logoTexture() {
 }
 function createScene(canvas, intro) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, window.LOW_END ? 1 : 1.5));
   const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x08170f, 9, 28);
   const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 80);
   scene.add(new THREE.AmbientLight(0xffffff, .8));
@@ -97,7 +98,7 @@ function createScene(canvas, intro) {
       const m = new THREE.Mesh(new THREE.TorusGeometry(r, .018, 8, 120), new THREE.MeshBasicMaterial({ color: [0x5eead4, 0x10b981, 0xef2b3d][i], transparent: true, opacity: .0 }));
       m.rotation.x = 1.2 + i * .25; m.rotation.y = i * .6; m.position.y = 1.1; scene.add(m); rings.push(m);
     });
-    const N = 700, pos = new Float32Array(N * 3), seed = [];
+    const N = window.LOW_END ? 220 : 600, pos = new Float32Array(N * 3), seed = [];
     for (let i = 0; i < N; i++) { const a = Math.random() * 6.283, r = 1.5 + Math.random() * 5, y = (Math.random() - .5) * 7 + 1; pos.set([Math.cos(a) * r, y, Math.sin(a) * r], i * 3); seed.push([a, r, y]); }
     const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0x5eead4, size: .06, transparent: true, opacity: .8 })); scene.add(pts);
@@ -176,7 +177,7 @@ function createScene(canvas, intro) {
 let banner = null, introScene = null;
 $('#introTitle').innerHTML = [...'MeatCity'].map((c, i) => `<span style="--i:${i}">${c}</span>`).join('');
 try { introScene = createScene($('#introCanvas'), true); } catch (e) { introScene = null; }
-try { banner = createScene($('#bannerCanvas'), false); } catch (e) { banner = null; }
+try { banner = window.createBanner ? createBanner($('#bannerCanvas')) : null; } catch (e) { banner = null; }
 async function playIntro() {
   await sleep(REDUCE ? 200 : 3000);
   const el = $('#intro');
@@ -342,35 +343,55 @@ async function pickProducts() {
     <div class="card" style="margin-top:0" data-a><b>${esc(S.client.name)}</b> <span class="mut">${S.client.agent ? '🧑‍💼 ' + esc(S.client.agent) : esc(S.client.region)}</span></div>
     <input id="pq" placeholder="🔍 Mahsulot qidirish…" value="${esc(S.q)}" data-a>
     <div class="chips" id="cats" data-a>${cats.map(c => `<div class="chip ${c === S.cat ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}</div>`).join('')}</div>
-    <div class="grid" id="grid"></div>`);
-  const draw = () => {
-    const q = S.q.toLowerCase();
-    const list = S.products.filter(p => (S.cat === 'Hammasi' || p.category === S.cat) && (!q || p.name.toLowerCase().includes(q)));
-    $('#grid').innerHTML = list.map((p, i) => `
-      <div class="prod rise ${S.cart[p.id] ? 'sel' : ''}" data-id="${p.id}" style="--i:${Math.min(i, 12)}">
-        <div class="im" style="${p.image ? `background-image:url('${esc(p.image)}')` : ''}">${p.image ? '' : '🥩'}<span class="tag">${esc(p.category)}</span></div>
+    <div class="grid" id="grid"></div><div id="sent" style="height:1px"></div>`);
+  let shown = 0, list = [];
+  const cardHtml = p => `
+      <div class="prod ${S.cart[p.id] ? 'sel' : ''}" data-id="${p.id}">
+        <div class="im ${p.image ? 'has' : ''}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('ok')" onerror="this.remove()">` : '🥩'}<span class="tag">${esc(p.category)}</span>${p.image ? '<span class="play">▶ Reklama</span>' : ''}</div>
         <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm${p.unit ? ' / ' + esc(p.unit) : ''}</div>
           <div class="qty"><button data-d="-1">−</button><input type="number" inputmode="decimal" min="0" step="any" value="${S.cart[p.id] || ''}" placeholder="0"><button data-d="1">+</button></div>
           <button class="add">Savatga</button></div>
-      </div>`).join('') || '<div class="mut" style="grid-column:1/-1;text-align:center;padding:24px">Hech narsa topilmadi</div>';
-    $$('#grid .prod').forEach(card => {
-      const id = card.dataset.id, inp = $('input', card);
-      const set = v => { v = Math.max(0, +v || 0); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); saveCart(); updateCartBar(true); buzz(); };
-      $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d));
-      inp.onchange = () => set(inp.value);
-      $('.add', card).onclick = () => { if (!+inp.value) set(1); fly($('.im', card)); };
-      bindTilt(card);
-    });
+      </div>`;
+  const bindCard = (card, p) => {
+    const id = card.dataset.id, inp = $('input', card);
+    const set = v => { v = Math.max(0, +v || 0); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); saveCart(); updateCartBar(true); buzz(); };
+    $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d));
+    inp.onchange = () => set(inp.value);
+    $('.add', card).onclick = () => { if (!+inp.value) set(1); fly($('.im', card)); };
+    if (p.image) $('.im', card).onclick = () => {
+      buzz('medium'); const prev = backFn;
+      setBack(() => window.__adClose && window.__adClose()); window.__adBack = () => setBack(prev);
+      window.openAd(p, () => { if (!+inp.value) set(1); toast('Savatga qo\'shildi'); });
+    };
+    bindTilt(card);
+  };
+  const more = () => {                                   // 24 tadan chiqaradi — telefon qotmaydi
+    const grid = $('#grid'), end = Math.min(list.length, shown + 24);
+    for (let k = shown; k < end; k++) {
+      const t = document.createElement('div'); t.innerHTML = cardHtml(list[k]); const card = t.firstElementChild;
+      if (k < 10) { card.classList.add('rise'); card.style.setProperty('--i', k); }
+      bindCard(card, list[k]); grid.appendChild(card);
+    }
+    shown = end;
+  };
+  const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => { if (es[0].isIntersecting && shown < list.length) more(); }, { rootMargin: '700px' }) : null;
+  const draw = () => {
+    const q = S.q.toLowerCase();
+    list = S.products.filter(p => (S.cat === 'Hammasi' || p.category === S.cat) && (!q || p.name.toLowerCase().includes(q)));
+    shown = 0; $('#grid').innerHTML = '';
+    if (!list.length) { $('#grid').innerHTML = '<div class="mut" style="grid-column:1/-1;text-align:center;padding:24px">Hech narsa topilmadi</div>'; return; }
+    more();
+    if (io) { io.disconnect(); io.observe($('#sent')); } else while (shown < list.length) more();
   };
   $$('#cats .chip').forEach(c => c.onclick = () => { S.cat = c.dataset.c; buzz(); $$('#cats .chip').forEach(x => x.classList.toggle('on', x === c)); draw(); });
-  $('#pq').oninput = e => { S.q = e.target.value; draw(); };
+  let pqT; $('#pq').oninput = e => { S.q = e.target.value; clearTimeout(pqT); pqT = setTimeout(draw, 140); };
   $('#cartBtn').onclick = confirmView;
   draw(); updateCartBar(true);
 }
 function fly(src) {
   if (REDUCE) return;
   const a = src.getBoundingClientRect(), b = $('#cartBtn').getBoundingClientRect();
-  const el = document.createElement('div'); el.className = 'fly'; el.style.backgroundImage = src.style.backgroundImage; document.body.appendChild(el);
+  const el = document.createElement('div'); el.className = 'fly'; { const im = src.querySelector('img'); if (im) el.style.backgroundImage = `url('${im.currentSrc || im.src}')`; } document.body.appendChild(el);
   const sx = a.left + a.width / 2 - 28, sy = a.top + a.height / 2 - 28, ex = b.left + b.width / 2 - 28, ey = b.top + b.height / 2 - 28;
   el.animate([{ transform: `translate(${sx}px,${sy}px) scale(1.2) rotate(0)`, opacity: 1, left: 0, top: 0 },
     { transform: `translate(${(sx + ex) / 2}px,${Math.min(sy, ey) - 90}px) scale(.8) rotate(120deg)`, opacity: 1, left: 0, top: 0, offset: .45 },

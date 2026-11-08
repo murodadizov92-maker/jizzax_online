@@ -517,7 +517,7 @@ BOOT_V = str(int(time.time()))
 async def h_index(request):
     # style/app manzillariga versiya qo'shamiz: har deploy'da Telegram yangi faylni oladi (kesh muammosi yo'q)
     html = (BASE / "webapp" / "index.html").read_text("utf-8")
-    html = html.replace("/static/style.css", f"/static/style.css?v={BOOT_V}").replace("/static/app.js", f"/static/app.js?v={BOOT_V}")
+    html = re.sub(r'(/static/[\w.]+\.(?:js|css))', rf'\1?v={BOOT_V}', html)
     return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-store"})
 
 

@@ -11,11 +11,10 @@ body{padding-bottom:120px;min-height:100vh;overflow-x:hidden}
 
 /* ---------- jonli fon ---------- */
 #bg{position:fixed;inset:0;z-index:-1;overflow:hidden;background:radial-gradient(120% 80% at 50% 0%,var(--bg2),var(--bg))}
-#bg i{position:absolute;width:60vmax;height:60vmax;border-radius:50%;filter:blur(70px);opacity:.28;animation:drift 18s ease-in-out infinite alternate}
-#bg i:nth-child(1){background:#0ea371;left:-20vmax;top:-10vmax}
-#bg i:nth-child(2){background:#1e6b8a;right:-25vmax;top:30vh;animation-duration:24s;animation-delay:-6s;opacity:.22}
-#bg i:nth-child(3){background:#b3121f;left:10vw;bottom:-35vmax;animation-duration:30s;animation-delay:-12s;opacity:.16}
-@keyframes drift{to{transform:translate3d(8vmax,5vmax,0) scale(1.15)}}
+#bg i{position:absolute;width:70vmax;height:70vmax;border-radius:50%;opacity:.3}
+#bg i:nth-child(1){background:radial-gradient(circle,#0ea371 0%,transparent 65%);left:-25vmax;top:-20vmax}
+#bg i:nth-child(2){background:radial-gradient(circle,#1e6b8a 0%,transparent 65%);right:-35vmax;top:30vh;opacity:.22}
+#bg i:nth-child(3){background:radial-gradient(circle,#b3121f 0%,transparent 65%);left:0;bottom:-45vmax;opacity:.16}
 
 /* ---------- intro ---------- */
 #intro{position:fixed;inset:0;z-index:100;background:radial-gradient(circle at 50% 42%,#0f3d2d,#06120e 68%)}
@@ -31,11 +30,11 @@ body{padding-bottom:120px;min-height:100vh;overflow-x:hidden}
 @keyframes fadeup{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 
 /* ---------- sarlavha (3D sahna) ---------- */
-header#top{position:sticky;top:0;z-index:10;height:150px;overflow:hidden;border-radius:0 0 28px 28px;box-shadow:0 14px 40px #0008;
+header#top{position:sticky;top:0;z-index:10;height:150px;contain:layout paint;overflow:hidden;border-radius:0 0 28px 28px;box-shadow:0 14px 40px #0008;
   background:linear-gradient(#0d2c21,#08170f);transform:translateY(0);transition:transform .8s var(--ease)}
 body.booting header#top{transform:translateY(-110%)}
 #bannerCanvas{width:100%;height:100%;display:block}
-.banner-glass{position:absolute;left:12px;bottom:12px;padding:8px 14px;border-radius:16px;background:rgba(6,18,14,.45);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line)}
+.banner-glass{position:absolute;left:12px;bottom:12px;padding:8px 14px;border-radius:16px;background:rgba(6,18,14,.62);border:1px solid var(--line)}
 .banner-glass b{display:block;font-size:17px}
 .banner-glass span{color:var(--mint);font-size:12.5px}
 
@@ -45,11 +44,11 @@ h2{margin:6px 0 12px;font-size:20px}
 /* ---------- kirish animatsiyasi (pastdan chiqish, blur) ---------- */
 .rise{opacity:0;animation:rise .65s var(--ease) forwards;animation-delay:calc(var(--i,0)*55ms)}
 body.booting .rise{animation-play-state:paused}
-@keyframes rise{from{opacity:0;translate:0 22px;scale:.97;filter:blur(7px)}to{opacity:1;translate:0 0;scale:1;filter:blur(0)}}
+@keyframes rise{from{opacity:0;translate:0 18px}to{opacity:1;translate:0 0}}
 
 /* ---------- shisha kartochkalar ---------- */
 .card,.glass{background:var(--glass);border:1px solid var(--line);border-radius:20px;padding:14px;margin:10px 0;
-  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 8px 30px #0004,inset 0 1px 0 rgba(255,255,255,.08)}
+  background:rgba(18,40,32,.72);box-shadow:0 6px 20px #0003,inset 0 1px 0 rgba(255,255,255,.07)}
 .card.click{cursor:pointer;transition:transform .3s var(--spring),background .3s}
 .card.click:active{transform:scale(.97)}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
@@ -59,7 +58,7 @@ body.booting .rise{animation-play-state:paused}
 
 /* ---------- statistika (raqamlar sanaladi) ---------- */
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:6px}
-.stat{padding:12px 10px;border-radius:18px;background:linear-gradient(160deg,rgba(94,234,212,.14),rgba(255,255,255,.04));border:1px solid var(--line);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);position:relative;overflow:hidden}
+.stat{padding:12px 10px;border-radius:18px;background:linear-gradient(160deg,rgba(94,234,212,.14),rgba(255,255,255,.04));border:1px solid var(--line);position:relative;overflow:hidden}
 .stat::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,rgba(255,255,255,.14) 50%,transparent 70%);transform:translateX(-120%);animation:sheen 4.5s ease-in-out infinite 1.5s}
 @keyframes sheen{40%,100%{transform:translateX(120%)}}
 .stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
@@ -91,7 +90,7 @@ input:focus,textarea:focus{border-color:var(--mint);box-shadow:0 0 0 4px rgba(94
 .chip{white-space:nowrap;padding:8px 14px;border-radius:22px;background:var(--glass);border:1px solid var(--line);color:var(--mut);font-size:13px;font-weight:600;transition:all .35s var(--spring)}
 .chip.on{background:linear-gradient(135deg,var(--mint),var(--green));color:#04140d;border-color:transparent;transform:scale(1.06);box-shadow:0 6px 18px #10b98166}
 
-.client{padding:13px 14px;border-radius:18px;background:var(--glass);border:1px solid var(--line);margin:8px 0;transition:transform .3s var(--spring),background .3s,border-color .3s;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.client{padding:13px 14px;border-radius:18px;background:var(--glass);border:1px solid var(--line);margin:8px 0;background:rgba(18,40,32,.7);transition:transform .3s var(--spring),background .3s,border-color .3s}
 .client:active{transform:scale(.97);background:var(--glass2);border-color:var(--mint)}
 .client b{font-size:15px}
 .client mark{background:none;color:var(--mint)}
@@ -102,13 +101,18 @@ input:focus,textarea:focus{border-color:var(--mint);box-shadow:0 0 0 4px rgba(94
 
 /* ---------- mahsulotlar (3D tilt + yaltirash) ---------- */
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;perspective:1000px}
-.prod{position:relative;border-radius:22px;overflow:hidden;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .25s ease-out,box-shadow .3s;transform-style:preserve-3d;will-change:transform;box-shadow:0 10px 26px #0005}
+.prod{position:relative;border-radius:22px;overflow:hidden;background:rgba(18,40,32,.8);border:1px solid var(--line);content-visibility:auto;contain-intrinsic-size:auto 300px;
+  transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .25s ease-out,box-shadow .3s;box-shadow:0 6px 18px #0004}
 .prod.tilt{transition:transform .08s linear}
 .prod::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(180px circle at var(--gx,50%) var(--gy,0%),rgba(255,255,255,.22),transparent 60%);opacity:var(--go,0);transition:opacity .3s}
 .prod .im{aspect-ratio:1;background:radial-gradient(circle at 30% 20%,#14503c,#0a2219) center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:42px;position:relative;transition:transform .5s var(--ease)}
 .prod:active .im{transform:scale(1.06)}
-.prod .tag{position:absolute;left:8px;top:8px;padding:3px 9px;border-radius:12px;font-size:10.5px;font-weight:700;background:rgba(6,18,14,.6);backdrop-filter:blur(8px);border:1px solid var(--line)}
+.prod .tag{position:absolute;left:8px;top:8px;padding:3px 9px;border-radius:12px;font-size:10.5px;font-weight:700;background:rgba(6,18,14,.75);border:1px solid var(--line);z-index:2}
+.prod .im img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .4s}
+.prod .im img.ok{opacity:1}
+.prod .im.has{cursor:pointer;background:#fff}
+.prod .play{position:absolute;right:8px;bottom:8px;padding:5px 10px;border-radius:14px;font-size:11px;font-weight:800;background:rgba(6,18,14,.78);border:1px solid rgba(255,255,255,.25);z-index:2;animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.08);box-shadow:0 0 0 6px rgba(94,234,212,.15)}}
 .prod .in{padding:10px}
 .prod .nm{font-weight:700;font-size:13.5px;min-height:36px;line-height:1.3}
 .prod .pr{color:var(--gold);font-weight:800;margin:3px 0 8px}
@@ -142,7 +146,7 @@ body.booting #dock{transform:translateX(-50%) translateY(200%)}
 #dock button.on svg{transform:scale(1.12) rotate(-6deg)}
 #dockBlob{position:absolute;top:6px;bottom:6px;left:0;width:60px;border-radius:20px;background:linear-gradient(135deg,var(--mint),var(--green));box-shadow:0 8px 22px rgba(16,185,129,.5);transition:transform .5s var(--spring),width .5s var(--spring)}
 
-#toast{position:fixed;left:50%;top:164px;transform:translateX(-50%) translateY(-24px) scale(.9);background:rgba(8,24,18,.85);backdrop-filter:blur(16px);border:1px solid var(--line);color:#fff;padding:11px 18px;border-radius:16px;opacity:0;transition:.4s var(--spring);z-index:120;pointer-events:none;max-width:90%;font-weight:600}
+#toast{position:fixed;left:50%;top:164px;transform:translateX(-50%) translateY(-24px) scale(.9);background:rgba(8,24,18,.95);border:1px solid var(--line);color:#fff;padding:11px 18px;border-radius:16px;opacity:0;transition:.4s var(--spring);z-index:120;pointer-events:none;max-width:90%;font-weight:600}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}
 #fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:110}
 
@@ -166,3 +170,10 @@ body.booting #dock{transform:translateX(-50%) translateY(200%)}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important}
 }
+
+/* ---------- mahsulot reklamasi (to'liq ekran) ---------- */
+#ad{position:fixed;inset:0;z-index:130;background:#000;opacity:0;transition:opacity .35s}
+#ad.on{opacity:1}
+#ad canvas{width:100%;height:100%;display:block}
+.ad-x{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(0,0,0,.45);color:#fff;font-size:18px}
+.ad-bar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(18px + env(safe-area-inset-bottom))}
