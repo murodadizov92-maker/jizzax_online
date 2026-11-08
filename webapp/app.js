@@ -177,7 +177,8 @@ function createScene(canvas, intro) {
 let banner = null, introScene = null;
 $('#introTitle').innerHTML = [...'MeatCity'].map((c, i) => `<span style="--i:${i}">${c}</span>`).join('');
 try { introScene = createScene($('#introCanvas'), true); } catch (e) { introScene = null; }
-try { banner = window.createBanner ? createBanner($('#bannerCanvas')) : null; } catch (e) { banner = null; }
+try { banner = window.createBanner ? createBanner($('#bannerCanvas'), () => S.products) : null; } catch (e) { banner = null; }
+window.__bannerAdd = p => { S.cart[p.id] = (S.cart[p.id] || 0) + 1; saveCart(); toast('Savatga qo\'shildi'); };
 async function playIntro() {
   await sleep(REDUCE ? 200 : 3000);
   const el = $('#intro');
@@ -457,6 +458,7 @@ function adminView() {
   try {
     S.me = await api('/api/me');
     $('#hello').textContent = 'Salom, ' + S.me.name;
+    api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
     home();
   } catch (e) {
     render(`<div class="card" data-a>Kirish xatosi: ${esc(e.message)}<div class="mut" style="margin-top:6px">Ilovani Telegram ichidan oching.</div></div>`);
