@@ -31,6 +31,38 @@
     g.beginPath(); if (g.roundRect) g.roundRect(0, 0, w, h, Math.min(w, h) * .08); else g.rect(0, 0, w, h); g.clip(); g.drawImage(im, 0, 0, w, h); return c;
   }
   function avgColor(c) { try { const s = document.createElement('canvas'); s.width = s.height = 6; const g = s.getContext('2d'); g.drawImage(c, 0, 0, 6, 6); const d = g.getImageData(0, 0, 6, 6).data; let r = 0, gg = 0, b = 0, n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 60) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++; } return n ? [r / n | 0, gg / n | 0, b / n | 0] : [150, 60, 40]; } catch (e) { return [150, 60, 40]; } }
+  // kvadrat oynali kengaytirish (mode=1) / toraytirish (mode=0)
+  function boxPass(src, w, h, r, mode) {
+    const win = 2 * r + 1, tmp = new Uint8Array(w * h), out = new Uint8Array(w * h), pre = new Int32Array(Math.max(w, h) + 1);
+    const cnt = (lo, hi, n) => { const l = Math.max(lo, 0), hh = Math.min(hi, n - 1); return [pre[hh + 1] - pre[l], win - (hh - l + 1)]; };
+    for (let y = 0; y < h; y++) { for (let x = 0; x < w; x++) pre[x + 1] = pre[x] + src[y * w + x]; for (let x = 0; x < w; x++) { const [c, pad] = cnt(x - r, x + r, w); tmp[y * w + x] = mode ? (c > 0 ? 1 : 0) : (c + pad === win ? 1 : 0); } }
+    for (let x = 0; x < w; x++) { for (let y = 0; y < h; y++) pre[y + 1] = pre[y] + tmp[y * w + x]; for (let y = 0; y < h; y++) { const [c, pad] = cnt(y - r, y + r, h); out[y * w + x] = mode ? (c > 0 ? 1 : 0) : (c + pad === win ? 1 : 0); } }
+    return out;
+  }
+  // rangli mahsulot (to'q sariq/qizil/pushti) bo'yicha niqob: oq lotok, soya va fon chiqib ketadi
+  function colorMask(px, w, h, bR, bG, bB) {
+    const N = w * h, A = new Uint8Array(N); let na = 0;
+    for (let i = 0; i < N; i++) {
+      const R = px[i * 4], G = px[i * 4 + 1], B = px[i * 4 + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+      const near = Math.max(Math.abs(R - bR), Math.abs(G - bG), Math.abs(B - bB)) < 30;
+      if (px[i * 4 + 3] > 12 && !near && ((mx - mn) >= 42 || mx < 70)) { A[i] = 1; na++; }
+    }
+    if (na / N < .05) return null;
+    const r = Math.max(3, Math.round(Math.min(w, h) * .06));
+    let C = boxPass(boxPass(A, w, h, r, 1), w, h, r, 0);
+    // tashqi fon: chetdan to'ldirish; qolgan hamma narsa (teshiklar ham) mahsulot
+    const out = new Uint8Array(N), st = [];
+    const push = i => { if (!out[i] && !C[i]) { out[i] = 1; st.push(i); } };
+    for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); } for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+    while (st.length) { const i = st.pop(), x = i % w, y = (i / w) | 0; if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (y > 0) push(i - w); if (y < h - 1) push(i + w); }
+    let fg = new Uint8Array(N); for (let i = 0; i < N; i++) fg[i] = out[i] ? 0 : 1;
+    fg = boxPass(fg, w, h, 1, 0);                                              // oq hoshiyani yeyish
+    // mahsulot ustidagi oq yorliq/polosa (ustun bo'ylab ikki tomonida mahsulot bor) — o'rnida qoladi
+    const gy = Math.round(h * .14); for (let x = 0; x < w; x++) { let last = -1; for (let y = 0; y < h; y++) if (fg[y * w + x]) { if (last >= 0 && y - last > 1 && y - last <= gy) for (let k = last + 1; k < y; k++) fg[k * w + x] = 1; last = y; } }
+    const bg = new Uint8Array(N); let nf = 0; for (let i = 0; i < N; i++) { bg[i] = fg[i] ? 0 : 1; nf += fg[i]; }
+    if (nf / N < .05 || nf / N > .92) return null;
+    return bg;
+  }
   function cutout(im, cors) {
     const MAX = LOW ? 460 : 640, sc = Math.min(1, MAX / Math.max(im.naturalWidth, im.naturalHeight));
     const w = Math.max(2, Math.round(im.naturalWidth * sc)), h = Math.max(2, Math.round(im.naturalHeight * sc));
@@ -51,17 +83,20 @@
       const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
       return (mx - mn) < 24 && mx > 120;                                      // och kulrang/oq fon, soyalar
     };
-    const bg = new Uint8Array(N), st = [];
-    const push = i => { if (!bg[i] && isBg(i)) { bg[i] = 1; st.push(i); } };
-    for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); } for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
-    while (st.length) { const i = st.pop(), x = i % w, y = (i / w) | 0; if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (y > 0) push(i - w); if (y < h - 1) push(i + w); }
+    let bg = colorMask(px, w, h, bR, bG, bB); const byColor = !!bg, st = [];
+    if (!bg) {
+      bg = new Uint8Array(N);
+      const push = i => { if (!bg[i] && isBg(i)) { bg[i] = 1; st.push(i); } };
+      for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); } for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+      while (st.length) { const i = st.pop(), x = i % w, y = (i / w) | 0; if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (y > 0) push(i - w); if (y < h - 1) push(i + w); }
+    }
     let nb = 0; for (let i = 0; i < N; i++) nb += bg[i];
     if (nb / N < .08 || nb / N > .93) return photo();
     // mahsulot ichidagi oq yorliq chetga tegib fonga qo'shilib ketgan bo'lsa — ustun/qator bo'ylab to'ldiramiz
     const gapX = Math.round(w * .16), gapY = Math.round(h * .16), fillM = new Uint8Array(N);
     for (let x = 0; x < w; x++) { let last = -1; for (let y = 0; y < h; y++) { if (!bg[y * w + x]) { if (last >= 0 && y - last > 1 && y - last <= gapY) for (let k = last + 1; k < y; k++) fillM[k * w + x] = 1; last = y; } } }
     for (let y = 0; y < h; y++) { let last = -1; for (let x = 0; x < w; x++) { if (!bg[y * w + x]) { if (last >= 0 && x - last > 1 && x - last <= gapX) for (let k = last + 1; k < x; k++) fillM[y * w + k] = 1; last = x; } } }
-    for (let i = 0; i < N; i++) if (fillM[i]) bg[i] = 0;
+    if (!byColor) for (let i = 0; i < N; i++) if (fillM[i]) bg[i] = 0;
     // eng katta bo'laklarni qoldiramiz
     const comp = new Int32Array(N), sizes = [0]; let nc = 0;
     for (let s = 0; s < N; s++) {
