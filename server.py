@@ -490,8 +490,22 @@ async def h_order_delete(request):
     return web.json_response({"ok": True})
 
 
+BOOT_V = str(int(time.time()))
+
+
 async def h_index(request):
-    return web.FileResponse(BASE / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})
+    # style/app manzillariga versiya qo'shamiz: har deploy'da Telegram yangi faylni oladi (kesh muammosi yo'q)
+    html = (BASE / "webapp" / "index.html").read_text("utf-8")
+    html = html.replace("/static/style.css", f"/static/style.css?v={BOOT_V}").replace("/static/app.js", f"/static/app.js?v={BOOT_V}")
+    return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+@web.middleware
+async def nocache_mw(request: web.Request, handler):
+    resp = await handler(request)
+    if request.path.startswith("/static/") or request.path == "/":
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 async def on_start(app):
@@ -500,7 +514,7 @@ async def on_start(app):
 
 
 def make_app():
-    app = web.Application(middlewares=[auth_mw], client_max_size=20 * 1024 * 1024)
+    app = web.Application(middlewares=[nocache_mw, auth_mw], client_max_size=20 * 1024 * 1024)
     app.add_routes([
         web.get("/", h_index),
         web.get("/health", h_health),
