@@ -193,7 +193,7 @@ async function newOrder() {
   let tm;
   const search = async () => {
     const { items } = await api(`/api/clients?q=${encodeURIComponent($('#q').value)}&region=${encodeURIComponent(S.region)}`);
-    $('#res').innerHTML = items.length ? items.map(c => `<div class="client" data-id="${c.id}"><b>${esc(c.name)}</b><div class="mut">${esc(c.region)} ${esc(c.address)} ${esc(c.phone)}</div></div>`).join('') : '<div class="mut" style="margin-top:12px">Mijoz topilmadi</div>';
+    $('#res').innerHTML = items.length ? items.map(c => `<div class="client" data-id="${c.id}"><b>${esc(c.name)}</b><div class="mut">${esc(c.region)} ${esc(c.address)} ${esc(c.phone)}${c.agent ? ' · 🧑‍💼 ' + esc(c.agent) : ''}</div></div>`).join('') : '<div class="mut" style="margin-top:12px">Mijoz topilmadi</div>';
     $('#res').querySelectorAll('.client').forEach(el => el.onclick = () => { S.client = items.find(c => c.id == el.dataset.id); pickProducts(); });
   };
   $('#q').oninput = () => { clearTimeout(tm); tm = setTimeout(search, 200); };
@@ -284,7 +284,7 @@ function adminView() {
   clearTimer(); setBack(home); updateCartBar(false);
   view.innerHTML = `
     <h2>⚙️ Admin</h2>
-    <div class="card"><b>Mijozlar bazasi</b><div class="mut">Hozir: ${S.me.clients} ta. Excel ustunlari: Клиент/Nom, Телефон, Район/Shahar, Адрес</div>
+    <div class="card"><b>Mijozlar bazasi</b><div class="mut">Hozir: ${S.me.clients} ta. Sales Doctor Excel: ИД клиента, Название клиента, Агент, Территория (yoki Nom, Telefon, Hudud, Manzil)</div>
       <input type="file" id="xl" accept=".xlsx" style="margin-top:8px"><button class="btn sec small" id="up" style="margin-top:8px">📥 Excel yuklash</button></div>
     <div class="card"><b>Mijoz qo'shish</b>
       <input id="n" placeholder="Nomi" style="margin-top:8px"><input id="ph" placeholder="Telefon" style="margin-top:6px"><input id="rg" placeholder="Hudud (masalan Paxtakor shahar)" style="margin-top:6px"><input id="ad" placeholder="Manzil" style="margin-top:6px">
