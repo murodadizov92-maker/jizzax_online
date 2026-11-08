@@ -3,23 +3,45 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#06120e">
 <title>MeatCity Jizzax — Online zakas</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-<div id="intro"><canvas id="introCanvas"></canvas><div class="intro-text"><b>MeatCity</b><span>Jizzax · Online zakas</span></div></div>
+<body class="booting">
+<div id="bg"><i></i><i></i><i></i></div>
+
+<div id="intro">
+  <canvas id="introCanvas"></canvas>
+  <div class="intro-text">
+    <b id="introTitle"></b>
+    <span>Jizzax · Online zakas</span>
+    <div class="intro-bar"><i></i></div>
+  </div>
+</div>
 
 <header id="top">
   <canvas id="bannerCanvas"></canvas>
-  <div class="banner-title"><b>MeatCity Jizzax</b><span id="hello"></span></div>
+  <div class="banner-glass">
+    <b>MeatCity Jizzax</b>
+    <span id="hello">Online zakas</span>
+  </div>
 </header>
 
 <main id="view"></main>
 
 <div id="cartbar" class="hidden"><button id="cartBtn"></button></div>
+
+<nav id="dock" class="hidden">
+  <i id="dockBlob"></i>
+  <button data-d="home" aria-label="Zakaslar"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Zakaslar</span></button>
+  <button data-d="new" aria-label="Yangi zakas"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Yangi</span></button>
+  <button data-d="admin" id="dockAdmin" class="hidden" aria-label="Admin"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg><span>Admin</span></button>
+</nav>
+
 <div id="toast"></div>
+<canvas id="fx"></canvas>
 
 <script src="/static/app.js"></script>
 </body>

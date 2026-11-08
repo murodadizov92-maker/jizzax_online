@@ -71,15 +71,32 @@ _CYR = dict(zip(
 
 
 def translit(text: str) -> str:
-    t = (text or "").lower().replace("’", "'").replace("`", "'")
-    lat = "".join(_CYR.get(ch, ch) for ch in t)
-    lat = lat.replace("kh", "x").replace("h", "x").replace("o'", "o").replace("g'", "g")
-    return lat.replace("u", "o")  # o/u yozuv farqi (dustlik/dostlik) topilishi uchun
+    """Kirill/lotin va turli yozilishlarni bitta 'skelet' ko'rinishiga keltiradi (faqat qidiruv uchun)."""
+    t = (text or "").lower()
+    for ch in "’`ʻʼ‘'":
+        t = t.replace(ch, "")
+    t = "".join(_CYR.get(ch, ch) for ch in t)
+    for a, b in (("sh", "s"), ("ch", "c"), ("ts", "s"), ("kh", "h"), ("zh", "j"), ("yo", "o"), ("yu", "u"),
+                 ("ya", "a"), ("ye", "e"), ("gh", "g"), ("x", "h"), ("q", "k"), ("w", "v"), ("y", "i"),
+                 ("u", "o"), ("e", "i")):
+        t = t.replace(a, b)
+    out = []
+    for ch in t:  # qo'sh harflar (kk, ll) bitta bo'lsin
+        if not out or out[-1] != ch:
+            out.append(ch)
+    return "".join(out)
 
 
 def norm(text: str) -> str:
-    """Asl (kichik harf) + lotin ko'rinishi — qidiruv ikkalasidan ham ishlaydi."""
+    """Asl (kichik harf) + skelet ko'rinishi."""
     return f"{(text or '').lower()} {translit(text)}"
+
+
+def reindex_clients():
+    for r in db.execute("SELECT id,name,phone,region,address,agent FROM clients").fetchall():
+        db.execute("UPDATE clients SET search=? WHERE id=?",
+                   (norm(f"{r['name']} {r['phone']} {r['region']} {r['address']} {r['agent']}"), r["id"]))
+    db.commit()
 
 
 def now() -> int:
@@ -323,23 +340,21 @@ async def h_products(request):
 
 
 async def h_regions(request):
-    rows = db.execute("SELECT region, COUNT(*) c FROM clients WHERE region!='' GROUP BY region ORDER BY c DESC").fetchall()
-    return web.json_response({"items": [{"region": r["region"], "count": r["c"]} for r in rows]})
+    # filtr endi AGENT bo'yicha (kalit nomi "region" frontend bilan mos qolishi uchun saqlandi)
+    rows = db.execute("SELECT agent, COUNT(*) c FROM clients WHERE agent!='' GROUP BY agent ORDER BY c DESC").fetchall()
+    return web.json_response({"items": [{"region": r["agent"], "count": r["c"]} for r in rows]})
 
 
 async def h_clients(request):
     region = request.query.get("region", "").strip()
     sql, args = "SELECT id,name,phone,region,address,agent FROM clients WHERE 1=1", []
     if region:
-        sql += " AND region=?"
+        sql += " AND agent=?"
         args.append(region)
     term = request.query.get("q", "").strip()
-    if term:
-        # ikkala ko'rinish (asl va lotin) dan istalgan biri mos kelsa topiladi
-        t_orig = term.lower()
-        t_lat = translit(term)
+    for w in term.split():  # har bir so'z topilishi kerak (tartibi ahamiyatsiz)
         sql += " AND (search LIKE ? OR search LIKE ?)"
-        args += [f"%{t_orig}%", f"%{t_lat}%"]
+        args += [f"%{w.lower()}%", f"%{translit(w)}%"]
     sql += " ORDER BY name LIMIT 60"
     rows = db.execute(sql, args).fetchall()
     return web.json_response({"items": [dict(r) for r in rows]})
@@ -480,6 +495,7 @@ async def h_index(request):
 
 
 async def on_start(app):
+    reindex_clients()
     app["tasks"] = [asyncio.create_task(poll_bot()), asyncio.create_task(keepalive())]
 
 
