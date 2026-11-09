@@ -33,7 +33,7 @@ Narx/rasm/kategoriya zakas bot admin panelida o'zgarsa, ~45 soniyada bu yerda ha
 
 
 ## Sklad qoldig'i (ostatka) va kg/dona
-- Render env: `SD_LOGIN`, `SD_PASSWORD` (Sales Doctor), ixtiyoriy `SD_DOMAIN` (standart aslbarakadzk.salesdoc.io), `SD_WAREHOUSE` (faqat shu sklad), `SD_STOCK_METHOD`, `SD_INTERVAL` (soniya, standart 600).
+- Render env: `SD_LOGIN`, `SD_PASSWORD` (Sales Doctor), ixtiyoriy `SD_DOMAIN` (standart aslbarakadzk.salesdoc.io), `SD_WAREHOUSE` (sklad nomining bir qismi — faqat shu sklad), `SD_INTERVAL` (soniya, standart 600).
 - Admin → "Sklad qoldig'i": «Sales Doctor'dan olish» yoki Excel (ustunlar: Наименование, Остаток, ixtiyoriy Ед.) yuklash.
 - Qoldiq yetmasa ham zakas yoziladi; tasdiqlash sahifasida "Yetmaydigan mahsulotlar" jadvali va har biriga izoh maydoni chiqadi, guruhga xabarda ham ⚠️ bilan ko'rsatiladi.
 - Admin mahsulot kartochkasidagi «dona/kg» tugmasi bilan birlikni belgilaydi (kg uchun qadam 0,5).

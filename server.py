@@ -37,10 +37,10 @@ DB_PATH = os.getenv("DB_PATH", str(BASE / "data" / "online.db"))
 DEV = os.getenv("DEV") == "1"                 # faqat lokal sinov uchun
 SELF_URL = os.getenv("RENDER_EXTERNAL_URL", os.getenv("SELF_URL", ""))
 # Sales Doctor (sklad qoldig'i): login/parol faqat Render env'ga yoziladi, kodda yo'q
-SD_DOMAIN = os.getenv("SD_DOMAIN", "aslbarakadzk.salesdoc.io").replace("https://", "").strip("/ ")
+SD_DOMAIN = os.getenv("SD_DOMAIN", "aslbarakadzk.salesdoc.io").strip("/ ")
+SD_URL = (SD_DOMAIN if SD_DOMAIN.startswith("http") else f"https://{SD_DOMAIN}") + "/api/v2"
 SD_LOGIN = os.getenv("SD_LOGIN", "")
 SD_PASSWORD = os.getenv("SD_PASSWORD", "")
-SD_STOCK_METHOD = os.getenv("SD_STOCK_METHOD", "getBalance")
 SD_WAREHOUSE = os.getenv("SD_WAREHOUSE", "").strip()        # ixtiyoriy: faqat shu sklad nomi
 SD_INTERVAL = int(os.getenv("SD_INTERVAL", "600"))          # soniya
 STATUSES = ["new", "collecting", "on_way", "delivered"]
@@ -171,78 +171,90 @@ def save_stock(rows: list, src: str):
     return len(agg)
 
 
-_NAME_KEYS = ("product_name", "productname", "name", "title", "nomi", "наименование", "товар", "product")
-_QTY_KEYS = ("balance", "quantity", "qty", "amount", "count", "remain", "remains", "ostatok", "stock", "остаток", "количество")
-_UNIT_KEYS = ("measure", "unit", "measure_name", "unit_name", "ед", "birlik")
+# Sales Doctor API v2 (https://github.com/Clever91/salesdoc-api-doc): POST https://{domain}/api/v2
+#   1) {"method":"login","auth":{"login","password"}} -> result.userId, result.token
+#   2) {"method":"getStock","auth":{"userId","token"},"params":{...}} -> result: sklad -> products[].name / quantity
+_sd = {"auth": None}
 
 
-def _find_rows(x):
-    if isinstance(x, list):
-        if x and all(isinstance(i, dict) for i in x):
-            return x
-        for i in x:
-            r = _find_rows(i)
-            if r:
-                return r
-    elif isinstance(x, dict):
-        for v in x.values():
-            r = _find_rows(v)
-            if r:
-                return r
-    return []
+async def sd_post(body: dict):
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as s:
+        async with s.post(SD_URL, json=body) as r:
+            txt = await r.text()
+            try:
+                return r.status, json.loads(txt), txt
+            except Exception:
+                return r.status, None, txt
 
 
-def _kget(d: dict, keys):
-    low = {str(k).lower(): v for k, v in d.items()}
-    for k in keys:
-        if k in low and low[k] not in (None, ""):
-            return low[k]
-    return None
+async def sd_login():
+    st, data, txt = await sd_post({"method": "login", "auth": {"login": SD_LOGIN, "password": SD_PASSWORD}})
+    res = (data or {}).get("result") or {}
+    if not res.get("token"):
+        raise RuntimeError(f"Sales Doctor login xato (HTTP {st}): {(txt or '')[:300]}")
+    _sd["auth"] = {"userId": res.get("userId"), "token": res["token"]}
 
 
-def parse_sd_rows(data) -> list:
-    out = []
-    for r in _find_rows(data):
-        if SD_WAREHOUSE and SD_WAREHOUSE.lower() not in json.dumps(r, ensure_ascii=False).lower():
-            continue
-        name = _kget(r, _NAME_KEYS)
-        qty = _kget(r, _QTY_KEYS)
-        if isinstance(name, dict):
-            name = _kget(name, _NAME_KEYS)
-        if name is None or qty is None:
-            continue
-        unit = _kget(r, _UNIT_KEYS)
-        out.append((str(name), _num(qty), str(unit.get("name", "")) if isinstance(unit, dict) else str(unit or "")))
+def parse_stock(node, wh="", out=None):
+    """getStock javobidan [(nom, miqdor)] — sklad nomi SD_WAREHOUSE berilgan bo'lsa shunga mos kelganlari."""
+    out = [] if out is None else out
+    if isinstance(node, dict):
+        name = node.get("name") if isinstance(node.get("name"), str) else wh
+        if "quantity" in node and isinstance(node.get("name"), str) and "products" not in node:
+            if not SD_WAREHOUSE or SD_WAREHOUSE.lower() in (wh or "").lower():
+                out.append((node["name"], _num(node["quantity"]), ""))
+            return out
+        for v in node.values():
+            parse_stock(v, name if "products" in node else wh, out)
+    elif isinstance(node, list):
+        for v in node:
+            parse_stock(v, wh, out)
     return out
 
 
-async def sd_call(method: str, params=None):
-    url = f"https://{SD_DOMAIN}/api/v1/"
-    body = {"auth": {"login": SD_LOGIN, "password": SD_PASSWORD}, "method": method, "params": params or {}}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as s:
-        async with s.post(url, json=body) as r:
-            return r.status, await r.text()
+async def sd_get_all(method: str, params=None):
+    """GET usuli: sahifalab (limit/page) hammasini oladi. Token eskirsa qayta login qiladi."""
+    rows, last = [], None
+    for page in range(1, 40):
+        for attempt in range(2):
+            if not _sd["auth"]:
+                await sd_login()
+            st, data, txt = await sd_post({"method": method, "auth": _sd["auth"], "params": {**(params or {}), "limit": 1000, "page": page}})
+            err = ((data or {}).get("error") or {}) if isinstance(data, dict) else {}
+            if err.get("code") == 401 and attempt == 0:
+                _sd["auth"] = None
+                continue
+            break
+        last = (st, txt)
+        if not data or not data.get("status"):
+            raise RuntimeError(f"{method}: HTTP {st}: {(txt or '')[:300]}")
+        part = parse_stock((data or {}).get("result"))
+        rows += part
+        pg = data.get("pagination") or {}
+        total_pages = pg.get("pages") or pg.get("pageCount") or pg.get("totalPages")
+        if total_pages is not None:
+            if page >= int(total_pages):
+                break
+        elif len(part) < 1000:
+            break
+    return rows, last
 
 
 async def sync_stock(debug=False):
     if not (SD_LOGIN and SD_PASSWORD):
         _stock["error"] = "SD_LOGIN / SD_PASSWORD kiritilmagan"
         return {"ok": False, "error": _stock["error"]}
-    tried = []
-    for m in dict.fromkeys([SD_STOCK_METHOD, "getBalance", "getStock", "getRemains", "getProductBalance"]):
-        try:
-            st, txt = await sd_call(m)
-            data = json.loads(txt)
-        except Exception as e:
-            tried.append({"method": m, "error": str(e)[:200]})
-            continue
-        rows = parse_sd_rows(data)
-        tried.append({"method": m, "http": st, "rows": len(rows), "sample": txt[:600] if (debug or not rows) else ""})
-        if rows:
-            n = save_stock(rows, "sd")
-            return {"ok": True, "method": m, "rows": n, "tried": tried if debug else None}
-    _stock["error"] = "Sales Doctor javobidan qoldiq topilmadi"
-    return {"ok": False, "error": _stock["error"], "tried": tried}
+    try:
+        rows, last = await sd_get_all("getStock")
+    except Exception as e:
+        _sd["auth"] = None
+        _stock["error"] = str(e)[:300]
+        return {"ok": False, "error": _stock["error"]}
+    if not rows:
+        _stock["error"] = "getStock javobida mahsulot topilmadi"
+        return {"ok": False, "error": _stock["error"], "tried": [{"http": last[0], "sample": (last[1] or "")[:700]}] if last else []}
+    n = save_stock(rows, "sd")
+    return {"ok": True, "method": "getStock", "rows": n}
 
 
 async def stock_loop():
