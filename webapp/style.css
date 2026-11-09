@@ -318,3 +318,11 @@ body.big .unb{min-height:50px;font-size:16px}
 .prod .qty input{flex:1 1 auto;min-width:64px;width:auto;font-size:18px;padding:10px 2px;height:42px}
 body.big .prod .qty button{width:42px;height:48px}
 body.big .prod .qty input{min-width:70px;font-size:20px;height:48px}
+.prod .qty{gap:4px;width:100%}
+.prod .qty button{width:32px;height:40px;font-size:18px;padding:0;border-radius:11px}
+.prod .qty input{flex:1 1 0;min-width:0;font-size:14px;font-weight:700;height:40px;padding:0 2px}
+body.big .prod .qty button{width:36px;height:46px}
+body.big .prod .qty input{min-width:0;font-size:17px;height:46px}
+
+/* savat tugmasi chiqqanda dock yashirinadi (ikkalasi ekranni to'smasin); orqaga — yuqoridagi strelka */
+body:has(#cartbar:not(.hidden)) #dock{transform:translateX(-50%) translateY(220%);opacity:0;pointer-events:none}
