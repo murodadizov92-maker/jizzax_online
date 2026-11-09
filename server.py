@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS stock(
   key TEXT PRIMARY KEY, name TEXT, qty REAL, unit TEXT DEFAULT '', src TEXT, updated INTEGER);
 CREATE TABLE IF NOT EXISTS pmeta(pid TEXT PRIMARY KEY, unit TEXT);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS access(tg_id INTEGER PRIMARY KEY, agent TEXT NOT NULL, added INTEGER);
 """
 )
 db.commit()
@@ -428,8 +429,14 @@ async def auth_mw(request: web.Request, handler):
         )
         db.commit()
         request["uid"] = user["id"]
-        request["uname"] = name
         request["admin"] = user["id"] in ADMIN_IDS
+        acc = db.execute("SELECT agent FROM access WHERE tg_id=?", (user["id"],)).fetchone()
+        request["agent"] = acc["agent"] if acc else ""
+        request["allowed"] = request["admin"] or bool(acc)
+        # zakas guruhida va ilovada ko'rinadigan ism: agent bo'lsa — Sales Doctor'dagi agent nomi
+        request["uname"] = request["agent"] or name
+        if not request["allowed"] and request.path != "/api/me":
+            return web.json_response({"error": "Sizga ruxsat berilmagan", "code": "noaccess"}, status=403)
     return await handler(request)
 
 
@@ -637,7 +644,8 @@ async def h_health(request):
 async def h_me(request):
     u = db.execute("SELECT * FROM users WHERE tg_id=?", (request["uid"],)).fetchone()
     return web.json_response({
-        "id": u["tg_id"], "name": u["name"], "region": u["region"] or "", "admin": request["admin"],
+        "id": u["tg_id"], "name": request["uname"], "tg_name": u["name"], "region": u["region"] or "", "admin": request["admin"],
+        "allowed": request["allowed"], "agent": request["agent"],
         "clients": db.execute("SELECT COUNT(*) c FROM clients").fetchone()["c"],
     })
 
@@ -652,6 +660,25 @@ async def h_me_put(request):
 async def h_products(request):
     items = await get_products(force=request.query.get("force") == "1" and request["admin"])
     return web.json_response({"items": annotate(items), "t": _cache["t"], "stock_t": _stock["t"]})
+
+
+async def h_users(request):
+    need_admin(request)
+    rows = db.execute("SELECT u.tg_id,u.name,u.username,u.last_seen,a.agent FROM users u LEFT JOIN access a ON a.tg_id=u.tg_id ORDER BY (a.agent IS NULL), u.last_seen DESC LIMIT 200").fetchall()
+    agents = [r["agent"] for r in db.execute("SELECT agent FROM clients WHERE agent!='' GROUP BY agent ORDER BY COUNT(*) DESC").fetchall()]
+    return web.json_response({"items": [{**dict(r), "admin": r["tg_id"] in ADMIN_IDS} for r in rows], "agents": agents})
+
+
+async def h_user_access(request):
+    need_admin(request)
+    tid = int(request.match_info["id"])
+    agent = str((await request.json()).get("agent", "")).strip()
+    if agent:
+        db.execute("INSERT OR REPLACE INTO access(tg_id,agent,added) VALUES(?,?,?)", (tid, agent, now()))
+    else:
+        db.execute("DELETE FROM access WHERE tg_id=?", (tid,))
+    db.commit()
+    return web.json_response({"ok": True})
 
 
 async def h_unit(request):
@@ -695,12 +722,18 @@ async def h_stock_import(request):
 
 async def h_regions(request):
     # filtr endi AGENT bo'yicha (kalit nomi "region" frontend bilan mos qolishi uchun saqlandi)
-    rows = db.execute("SELECT agent, COUNT(*) c FROM clients WHERE agent!='' GROUP BY agent ORDER BY c DESC").fetchall()
+    sql, args = "SELECT agent, COUNT(*) c FROM clients WHERE agent!=''", []
+    if not request["admin"]:                      # agent faqat o'zini ko'radi
+        sql += " AND agent=?"
+        args.append(request["agent"])
+    rows = db.execute(sql + " GROUP BY agent ORDER BY c DESC", args).fetchall()
     return web.json_response({"items": [{"region": r["agent"], "count": r["c"]} for r in rows]})
 
 
 async def h_clients(request):
     region = request.query.get("region", "").strip()
+    if not request["admin"]:                      # agentga faqat o'z mijozlari (so'rovdagi filtr e'tiborga olinmaydi)
+        region = request["agent"]
     sql, args = "SELECT id,name,phone,region,address,agent FROM clients WHERE 1=1", []
     if region:
         sql += " AND agent=?"
@@ -786,6 +819,8 @@ async def h_client_add(request):
 
 async def h_orders(request):
     scope = request.query.get("scope", "all")
+    if not request["admin"]:
+        scope = "mine"
     sql, args = "SELECT * FROM orders", []
     if scope == "mine":
         sql += " WHERE tg_id=?"
@@ -799,6 +834,8 @@ async def h_order_create(request):
     client = db.execute("SELECT * FROM clients WHERE id=?", (b.get("client_id"),)).fetchone()
     if not client:
         return web.json_response({"error": "Mijoz tanlanmagan"}, status=400)
+    if not request["admin"] and client["agent"] != request["agent"]:
+        return web.json_response({"error": "Bu mijoz sizning bazangizda emas"}, status=403)
     catalog = {p["id"]: p for p in annotate(await get_products())}
     items, total = [], 0.0
     for it in b.get("items", []):
@@ -883,6 +920,8 @@ def make_app():
         web.put("/api/me", h_me_put),
         web.get("/api/products", h_products),
         web.put("/api/products/{id}/unit", h_unit),
+        web.get("/api/users", h_users),
+        web.put("/api/users/{id}/access", h_user_access),
         web.get("/api/stock/status", h_stock_status),
         web.post("/api/stock/sync", h_stock_sync),
         web.post("/api/stock/import", h_stock_import),

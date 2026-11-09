@@ -256,7 +256,7 @@ async function home() {
       <div class="stat"><b id="s3">0</b><small>Yo'lda</small></div>
     </div>
     <button class="btn" id="newOrd" data-a>➕ Yangi zakas</button>
-    <div class="tabs" data-a><i class="pill"></i><div class="tab ${S.tab === 'all' ? 'on' : ''}" data-t="all">Hamma zakaslar</div><div class="tab ${S.tab === 'mine' ? 'on' : ''}" data-t="mine">Mening zakaslarim</div></div>
+    <div class="tabs" data-a ${S.me.admin ? '' : 'style="display:none"'}><i class="pill"></i><div class="tab ${S.tab === 'all' ? 'on' : ''}" data-t="all">Hamma zakaslar</div><div class="tab ${S.tab === 'mine' ? 'on' : ''}" data-t="mine">Mening zakaslarim</div></div>
     <div id="list"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>`);
   ['s1', 's2', 's3'].forEach((id, i) => { const el = $('#' + id); const v = [S.stats.n, S.stats.sum, S.stats.way][i]; el.dataset.v = 0; countTo(el, v, { dur: 900 }); });
   setTimeout(paintTabsPill, 30);
@@ -311,13 +311,14 @@ function detail(o) {
 /* ================================================================== 1) mijoz */
 async function newOrder() {
   clearTimer(); setBack(home); updateCartBar(false); setDock('new'); banner && banner.setProgress(null);
-  S.region = S.me.region || ''; let agents = [];
+  S.region = S.me.admin ? (S.me.region || '') : (S.me.agent || ''); let agents = [];
   try { agents = (await api('/api/regions')).items; } catch (e) {}
   render(`
     <div class="steps" data-a><span class="on">1. Mijoz</span><span>2. Mahsulot</span><span>3. Tasdiq</span></div>
     <input id="q" placeholder="🔍 Mijoz nomini yozing…" autocomplete="off" data-a>
     <div class="chips" id="regs" data-a></div><div id="res"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>`);
   const drawRegs = () => {
+    if (!S.me.admin) $('#regs').style.display = 'none';
     $('#regs').innerHTML = `<div class="chip ${S.region ? '' : 'on'}" data-r="">Hammasi</div>` + agents.map(r => `<div class="chip ${S.region === r.region ? 'on' : ''}" data-r="${esc(r.region)}">🧑‍💼 ${esc(r.region)} <span style="opacity:.7">${r.count}</span></div>`).join('');
     $$('#regs .chip').forEach(c => c.onclick = () => {
       S.region = c.dataset.r; buzz(); drawRegs(); search();
@@ -461,10 +462,20 @@ function confirmView() {
 }
 
 /* ================================================================== admin */
+async function loadUsers() {
+  const box = $('#usr'); if (!box) return;
+  try {
+    const { items, agents } = await api('/api/users');
+    box.innerHTML = items.map(u => `<div style="display:flex;gap:8px;align-items:center;margin:6px 0"><div style="flex:1;min-width:0"><b>${esc(u.name)}</b>${u.admin ? ' 👑' : ''}<div class="mut" style="font-size:12px">${u.username ? '@' + esc(u.username) + ' · ' : ''}${u.tg_id}</div></div>
+      <select data-u="${u.tg_id}" style="max-width:48%"><option value="">🚫 Ruxsat yo'q</option>${agents.map(g => `<option ${u.agent === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>`).join('') || '<div class="mut">Hali hech kim kirmagan</div>';
+    box.querySelectorAll('select').forEach(s => s.onchange = async () => { try { await api('/api/users/' + s.dataset.u + '/access', { method: 'PUT', json: { agent: s.value } }); toast(s.value ? 'Ruxsat berildi' : 'Ruxsat olib tashlandi'); } catch (e) { toast(e.message); } });
+  } catch (e) { box.textContent = e.message; }
+}
 function adminView() {
   clearTimer(); setBack(home); updateCartBar(false); setDock('admin');
   render(`
     <h2 data-a>⚙️ Admin</h2>
+    <div class="card" data-a><b>👥 Foydalanuvchilar</b><div class="mut">Agentni Telegram foydalanuvchisiga bog'lang. Bog'langan agent zakas bera oladi va faqat o'z mijozlarini ko'radi; guruhga agent nomi bilan boradi.</div><div id="usr" style="margin-top:8px">...</div></div>
     <div class="card" data-a><b>Mijozlar bazasi</b><div class="mut">Hozir: ${S.me.clients} ta. Sales Doctor Excel: ИД клиента, Название клиента, Агент, Территория</div>
       <input type="file" id="xl" accept=".xlsx" style="margin-top:8px"><button class="btn sec small" id="up" style="margin-top:8px">📥 Excel yuklash</button></div>
     <div class="card" data-a><b>Mijoz qo'shish</b>
@@ -475,6 +486,7 @@ function adminView() {
       <div style="margin-top:8px"><input type="file" id="stx" accept=".xlsx"><button class="btn sec small" id="stup" style="margin-top:8px">📥 Excel'dan yuklash</button></div>
       <div class="mut" id="stdbg" style="margin-top:8px;white-space:pre-wrap;word-break:break-all;font-size:11px"></div></div>
     <div class="card" data-a><b>Mahsulotlarni yangilash</b><div class="mut">Narx/rasm zakas bot'dan avtomatik olinadi (har ~45 soniyada).</div><button class="btn sec small" id="sync" style="margin-top:8px">🔄 Hozir yangilash</button></div>`);
+  loadUsers();
   $('#up').onclick = async () => {
     const f = $('#xl').files[0]; if (!f) return toast('Fayl tanlang');
     const fd = new FormData(); fd.append('file', f);
@@ -508,6 +520,11 @@ function adminView() {
   try {
     S.me = await api('/api/me');
     $('#hello').textContent = 'Salom, ' + S.me.name;
+    if (!S.me.allowed) {
+      $('#dock') && $('#dock').classList.add('hidden');
+      render(`<div class="card" data-a style="text-align:center"><div style="font-size:42px">🔒</div><b>Zakas bo'limi yopiq</b><div class="mut" style="margin-top:6px">Bu bo'lim faqat savdo agentlari uchun. Ruxsat olish uchun adminga ID raqamingizni yuboring:</div><div style="font-size:22px;font-weight:700;margin-top:8px">${S.me.id}</div></div>`);
+      return;
+    }
     api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
     home();
   } catch (e) {
