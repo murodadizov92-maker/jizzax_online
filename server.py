@@ -177,14 +177,27 @@ def save_stock(rows: list, src: str):
 _sd = {"auth": None}
 
 
+SD_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "application/json", "Content-Type": "application/json",
+}
+
+
 async def sd_post(body: dict):
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as s:
-        async with s.post(SD_URL, json=body) as r:
-            txt = await r.text()
-            try:
-                return r.status, json.loads(txt), txt
-            except Exception:
-                return r.status, None, txt
+    """nginx ba'zan oddiy Python User-Agent'ni 403 bilan to'xtatadi — brauzer sarlavhalari bilan yuboramiz; 403 bo'lsa '/' bilan qayta."""
+    last = (0, None, "")
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90), headers=SD_HEADERS) as s:
+        for url in (SD_URL, SD_URL + "/"):
+            async with s.post(url, json=body) as r:
+                txt = await r.text()
+                try:
+                    data = json.loads(txt)
+                except Exception:
+                    data = None
+                last = (r.status, data, txt)
+                if r.status != 403:
+                    return last
+    return last
 
 
 async def sd_login():

@@ -361,9 +361,10 @@ async function pickProducts() {
   const cardHtml = p => `
       <div class="prod ${S.cart[p.id] ? 'sel' : ''}" data-id="${p.id}">
         <div class="im ${p.image ? 'has' : ''}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('ok')" onerror="this.remove()">` : '🥩'}<span class="tag">${esc(p.category)}</span>${p.image ? '<span class="play">▶ Reklama</span>' : ''}</div>
-        <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm / ${p.unit === 'kg' ? 'kg' : 'dona'}${S.me && S.me.admin ? `<button class="unitb" title="kg/dona">${p.unit === 'kg' ? '⚖️ kg' : '🔢 dona'}${p.unit_set ? '' : ' ?'}</button>` : ''}</div>
+        <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm / <span class="pr-u">${p.unit === 'kg' ? 'kg' : 'dona'}</span></div>
           ${(() => { const s = stockInfo(p); return s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''; })()}
           <div class="qty"><button data-d="-1">−</button><input type="number" inputmode="decimal" min="0" step="any" value="${S.cart[p.id] || ''}" placeholder="0"><button data-d="1">+</button><i class="un">${p.unit === 'kg' ? 'kg' : 'dona'}</i></div>
+          ${S.me && S.me.admin ? `<button class="unb">🔄 ${p.unit === 'kg' ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}</button>` : ''}
           <div class="warn ${shortOf(p, S.cart[p.id]) ? 'on' : ''}">⚠️ Yetmaydi: ${fq(shortOf(p, S.cart[p.id]))} · zakas baribir yoziladi</div>
           <button class="add">Savatga</button></div>
       </div>`;
@@ -372,8 +373,13 @@ async function pickProducts() {
     const warn = $('.warn', card);
     const set = v => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); const sh = shortOf(p, v); warn.classList.toggle('on', !!sh); warn.textContent = `⚠️ Yetmaydi: ${fq(sh)} · zakas baribir yoziladi`; saveCart(); updateCartBar(true); buzz(); };
     $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d * stepOf(p)));
-    const ub = $('.unitb', card);
-    if (ub) ub.onclick = async e => { e.stopPropagation(); const nu = p.unit === 'kg' ? 'dona' : 'kg'; try { await api(`/api/products/${p.id}/unit`, { method: 'PUT', json: { unit: nu } }); p.unit = nu; p.unit_set = true; const real = S.products.find(x => x.id === p.id); if (real) { real.unit = nu; real.unit_set = true; } toast(`${p.name}: ${nu}`); draw(); } catch (er) { toast(er.message); } };
+    const ub = $('.unb', card);
+    const paintUnit = () => { const k = p.unit === 'kg'; if (ub) ub.textContent = `🔄 ${k ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}`; $('.pr-u', card).textContent = k ? 'kg' : 'dona'; $('.qty .un', card).textContent = k ? 'kg' : 'dona'; };
+    if (ub) ub.onclick = async e => {                      // kartochka qayta chizilmaydi (animatsiyasiz) — faqat yozuv almashadi
+      e.stopPropagation(); const old = [p.unit, p.unit_set], nu = p.unit === 'kg' ? 'dona' : 'kg';
+      p.unit = nu; p.unit_set = true; paintUnit(); buzz();
+      try { await api(`/api/products/${p.id}/unit`, { method: 'PUT', json: { unit: nu } }); } catch (er) { [p.unit, p.unit_set] = old; paintUnit(); toast(er.message); }
+    };
     inp.onchange = () => set(inp.value);
     $('.add', card).onclick = () => { if (!+inp.value) set(stepOf(p) === .5 ? 1 : 1); fly($('.im', card)); };
     if (p.image) $('.im', card).onclick = () => {

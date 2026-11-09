@@ -293,3 +293,20 @@ body.big .warn{font-size:13.5px}
 body.big #cartBtn{padding:19px;font-size:18px}
 body.big .stbl{font-size:15px}body.big .badge{font-size:14px}
 body.big .steps span{font-size:13.5px}
+
+/* ---------- o'qilishi yaxshilandi: shisha ancha zichroq, yozuvlar qalin ---------- */
+.card,.glass,.client,.prod,.stat{background:linear-gradient(160deg,rgba(255,255,255,.86),rgba(255,255,255,.66))}
+input,textarea,select{background:rgba(255,255,255,.92)}
+.tabs{background:rgba(255,255,255,.78)}
+#dock{background:rgba(255,255,255,.8)}
+.chip{background:rgba(255,255,255,.88);color:#2b1d14;font-weight:800;border:1px solid #fff;box-shadow:0 2px 8px rgba(90,58,34,.12)}
+.chip span{opacity:1!important;color:var(--green);font-weight:800}
+.chip.on{color:#fff}.chip.on span{color:#fff}
+.tab{color:#2b1d14;font-weight:800}.tab.on{color:#fff}
+.steps span{color:#2b1d14;font-weight:800;background:rgba(255,255,255,.78);border-radius:10px;padding:12px 2px 6px}
+.steps span::before{top:0;border-radius:4px}
+.mut{color:rgba(60,40,28,.78)}
+.client b{font-weight:800}
+.unb{display:block;width:100%;margin-top:8px;padding:11px 12px;border-radius:14px;border:2px solid var(--mint);background:#fff;color:var(--green);font-size:15px;font-weight:800;white-space:nowrap}
+.unb:active{background:var(--mint);color:#fff}
+body.big .unb{min-height:50px;font-size:16px}
