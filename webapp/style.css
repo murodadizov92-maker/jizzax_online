@@ -178,3 +178,85 @@ body.booting #dock{transform:translateX(-50%) translateY(200%)}
 #ad canvas{width:100%;height:100%;display:block}
 .ad-x{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.7);color:#2a1810;font-size:18px}
 .ad-bar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(18px + env(safe-area-inset-bottom))}
+
+/* =====================================================================
+   ILIQ SHISHA MAVZUSI — xona rasmi (wall.svg yoki wall.jpg) ustida shishasimon panellar, to'q sariq urg'u
+   ===================================================================== */
+:root{
+  --bg:#e8dccf;--bg2:#efe4d8;
+  --glass:rgba(255,255,255,.4);--glass2:rgba(255,255,255,.62);--line:rgba(255,255,255,.72);
+  --txt:#2b1d14;--mut:rgba(72,50,36,.62);--mint:#ee7a2f;--green:#d9531a;--gold:#b4540f;--blue:#2f7be0;--vio:#7c4dd6;--warn:#c47a08;
+  --shadow:0 12px 32px rgba(90,58,34,.18);
+}
+html,body{background:var(--bg);color:var(--txt)}
+#bg{background:url(/static/wall.jpg) center/cover no-repeat,url(/static/wall.svg) center/cover no-repeat,#e8dccf;transform-origin:50% 40%;animation:drift 38s ease-in-out infinite alternate;will-change:transform}
+@keyframes drift{from{transform:scale(1.04) translate3d(-1.2%,0,0)}to{transform:scale(1.12) translate3d(1.2%,-1%,0)}}
+#bg i{opacity:.35;mix-blend-mode:soft-light}
+#bg i:nth-child(1){background:radial-gradient(circle,#fff 0%,transparent 65%);left:-25vmax;top:-20vmax;opacity:.5}
+#bg i:nth-child(2){background:radial-gradient(circle,#ffbf80 0%,transparent 65%);right:-35vmax;top:30vh;opacity:.4}
+#bg i:nth-child(3){background:radial-gradient(circle,#fff2dc 0%,transparent 65%);left:0;bottom:-45vmax;opacity:.45}
+
+#intro{background:radial-gradient(circle at 50% 42%,#f7eee4,#d9c6b2 70%)}
+.intro-text>span{color:var(--green)}
+.intro-bar{background:rgba(255,255,255,.6)}
+.intro-bar i{background:linear-gradient(90deg,#ffb37a,var(--green))}
+
+header#top{background:linear-gradient(#f6ede4,#eadccc);box-shadow:0 14px 36px rgba(90,58,34,.28),inset 0 -1px 0 rgba(255,255,255,.8)}
+.banner-glass{background:rgba(255,255,255,.58);border:1px solid rgba(255,255,255,.85);color:var(--txt);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 14px rgba(90,58,34,.15)}
+.banner-glass span{color:var(--green)}
+
+.card,.glass,.client,.prod,.stat{background:linear-gradient(160deg,rgba(255,255,255,.62),rgba(255,255,255,.3));border:1px solid rgba(255,255,255,.78);box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.95)}
+.prod{box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.95)}
+.stat::after{background:linear-gradient(110deg,transparent 30%,rgba(255,255,255,.7) 50%,transparent 70%)}
+.badge{background:rgba(255,255,255,.7)}
+.client:active{background:rgba(255,255,255,.85);border-color:var(--mint)}
+.client mark{color:var(--green);font-weight:800}
+.prod .im{background:radial-gradient(circle at 30% 20%,#fff,#eddcca) center/cover no-repeat}
+.prod .im.has{background:#fff}
+.prod .tag,.prod .play{background:rgba(255,255,255,.82);color:var(--txt);border:1px solid rgba(255,255,255,.95);backdrop-filter:none}
+.prod .pr{color:var(--gold)}
+.prod.sel{border-color:var(--mint);box-shadow:0 0 0 1.5px var(--mint),0 12px 30px rgba(238,122,47,.3)}
+@keyframes pulse{50%{transform:scale(1.08);box-shadow:0 0 0 6px rgba(238,122,47,.18)}}
+
+.btn.sec{color:var(--txt);background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.85)}
+.tabs{background:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.78)}
+.tab.on{color:#fff}
+.tabs .pill{background:linear-gradient(135deg,#ff9a55,var(--green));box-shadow:0 6px 16px rgba(217,83,26,.35)}
+input,textarea,select{background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.85);color:var(--txt)}
+input:focus,textarea:focus{border-color:var(--mint);box-shadow:0 0 0 4px rgba(238,122,47,.18)}
+::placeholder{color:rgba(72,50,36,.4)}
+.chip{background:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.8);color:var(--mut)}
+.chip.on{background:linear-gradient(135deg,#ff9a55,var(--green));color:#fff;box-shadow:0 6px 18px rgba(217,83,26,.4)}
+.sk{background:linear-gradient(100deg,rgba(255,255,255,.3) 30%,rgba(255,255,255,.65) 50%,rgba(255,255,255,.3) 70%);background-size:200% 100%}
+.qty button{background:rgba(255,255,255,.7);color:var(--txt);border:1px solid rgba(255,255,255,.9)}
+.qty button:active{background:var(--mint);color:#fff}
+#cartBtn{color:#fff;border:1px solid rgba(255,255,255,.6);background:linear-gradient(135deg,#ff9a55,var(--green));box-shadow:0 12px 30px rgba(217,83,26,.45)}
+.back{color:var(--green)}
+.steps span::before{background:rgba(255,255,255,.7)}
+.steps span.on::before{background:linear-gradient(90deg,#ff9a55,var(--green))}
+.track::before{background:rgba(255,255,255,.7)}
+.track i{background:linear-gradient(90deg,#ff9a55,var(--green))}
+.track span b{background:#fff;border-color:rgba(255,255,255,.9);color:var(--txt)}
+.track span.on b{background:var(--mint);border-color:var(--mint);color:#fff}
+#toast{background:rgba(255,255,255,.92);color:var(--txt);border:1px solid #fff;box-shadow:var(--shadow)}
+
+/* dock — shishasimon, tanlangani oq yaltiroq tabletka; pastga aylantirilsa yig'iladi */
+#dock{background:rgba(255,255,255,.42);border:1px solid rgba(255,255,255,.8);box-shadow:0 14px 38px rgba(90,58,34,.28),inset 0 1px 0 rgba(255,255,255,.95);transition:transform .8s var(--spring),opacity .4s,gap .45s var(--ease),padding .45s var(--ease)}
+#dock button{color:rgba(72,50,36,.7);max-width:140px;transition:color .3s,max-width .5s var(--ease),padding .5s var(--ease),opacity .35s}
+#dock button.on{color:var(--green)}
+#dock button:active svg{transform:scale(.82)}
+#dockBlob{background:linear-gradient(180deg,#fff,rgba(255,255,255,.78));box-shadow:0 8px 20px rgba(120,70,30,.28),inset 0 1px 0 #fff}
+#dock.mini{gap:0}
+#dock.mini button:not(.on){max-width:0;padding-left:0;padding-right:0;opacity:0;pointer-events:none}
+/* fon (#bg) ko'rinishi uchun body shaffof bo'lishi shart */
+html{background:var(--bg)}
+body{background:transparent}
+
+/* ---- yangi intro: kolbasa ranglari, oq yozuv ---- */
+#intro{background:radial-gradient(circle at 50% 40%,#ffb067,#c23a17 60%,#5b0f0f)}
+#intro,.intro-text{color:#fff}
+#introTitle{text-shadow:0 4px 18px rgba(60,5,5,.55)}
+#introTitle span{animation-delay:calc(1.7s + var(--i)*70ms)}
+.intro-text>span{color:#ffe3c4;animation-delay:2.5s;text-shadow:0 2px 10px rgba(60,5,5,.5)}
+.intro-bar{background:rgba(255,255,255,.28)}
+.intro-bar i{background:linear-gradient(90deg,#fff3dc,#ffd08a);animation-delay:1s;animation-duration:2.4s}

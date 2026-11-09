@@ -1,6 +1,6 @@
 /* MeatCity Jizzax — Online zakas Mini App (v2: animatsiyali) */
 const tg = window.Telegram && Telegram.WebApp;
-if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor('#06120e'); tg.setBackgroundColor('#06120e'); } catch (e) {} }
+if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor('#efe3d7'); tg.setBackgroundColor('#e8dccf'); } catch (e) {} }
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -79,11 +79,11 @@ function logoTexture() {
 function createScene(canvas, intro) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, window.LOW_END ? 1 : 1.5));
-  const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x08170f, 9, 28);
+  const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0xeadccd, 9, 28);
   const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 80);
   scene.add(new THREE.AmbientLight(0xffffff, .8));
   const dl = new THREE.DirectionalLight(0xffffff, .9); dl.position.set(4, 8, 6); scene.add(dl);
-  const rim = new THREE.PointLight(0x5eead4, 1.2, 20); rim.position.set(-3, 3, 4); scene.add(rim);
+  const rim = new THREE.PointLight(0xffb37a, 1.2, 20); rim.position.set(-3, 3, 4); scene.add(rim);
   const M = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, ...o });
   const box = (w, h, d, c, x, y, z, parent = scene) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(c)); m.position.set(x, y, z); parent.add(m); return m; };
   const logo = logoTexture();
@@ -95,13 +95,13 @@ function createScene(canvas, intro) {
     disc.rotation.x = Math.PI / 2; disc.scale.setScalar(.01); scene.add(disc);
     const rings = [];
     [1.7, 2.2, 2.7].forEach((r, i) => {
-      const m = new THREE.Mesh(new THREE.TorusGeometry(r, .018, 8, 120), new THREE.MeshBasicMaterial({ color: [0x5eead4, 0x10b981, 0xef2b3d][i], transparent: true, opacity: .0 }));
+      const m = new THREE.Mesh(new THREE.TorusGeometry(r, .018, 8, 120), new THREE.MeshBasicMaterial({ color: [0xf2762e, 0xffb37a, 0xef2b3d][i], transparent: true, opacity: .0 }));
       m.rotation.x = 1.2 + i * .25; m.rotation.y = i * .6; m.position.y = 1.1; scene.add(m); rings.push(m);
     });
     const N = window.LOW_END ? 220 : 600, pos = new Float32Array(N * 3), seed = [];
     for (let i = 0; i < N; i++) { const a = Math.random() * 6.283, r = 1.5 + Math.random() * 5, y = (Math.random() - .5) * 7 + 1; pos.set([Math.cos(a) * r, y, Math.sin(a) * r], i * 3); seed.push([a, r, y]); }
     const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0x5eead4, size: .06, transparent: true, opacity: .8 })); scene.add(pts);
+    const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffc89a, size: .06, transparent: true, opacity: .8 })); scene.add(pts);
     cam.position.set(0, 0, 10.5); cam.lookAt(0, .9, 0);
     let t0 = performance.now();
     tick.push(t => {
@@ -118,8 +118,8 @@ function createScene(canvas, intro) {
 
   // yo'l + mashina (banner va intro uchun)
   if (!intro) {
-    box(60, .1, 30, 0x0d2c21, 0, -.06, -4);
-    box(60, .06, 2.8, 0x20262b, 0, 0, 0);
+    box(60, .1, 30, 0xd9c5af, 0, -.06, -4);
+    box(60, .06, 2.8, 0x6b625a, 0, 0, 0);
     for (let x = -14; x <= 14; x += 2) box(.9, .02, .12, 0xf5e6a8, x, .04, 0);
   }
   const truck = new THREE.Group(); scene.add(truck);
@@ -143,10 +143,10 @@ function createScene(canvas, intro) {
 
   if (intro) { truck.visible = false; }
   else {
-    box(2.6, 1.8, 1.8, 0x1d4a3a, -6, .9, -2.4); box(2.8, .25, 2, 0xc4121f, -6, 1.9, -2.4);
-    box(2.2, 1.4, 1.6, 0x1f5a68, 6, .7, -2.4); box(2.4, .22, 1.8, 0x10b981, 6, 1.5, -2.4);
+    box(2.6, 1.8, 1.8, 0x9c8670, -6, .9, -2.4); box(2.8, .25, 2, 0xc4121f, -6, 1.9, -2.4);
+    box(2.2, 1.4, 1.6, 0xa8927c, 6, .7, -2.4); box(2.4, .22, 1.8, 0xf2762e, 6, 1.5, -2.4);
     box(.06, 1.2, .06, 0xdddddd, 6.9, 2.1, -2.4); box(.5, .3, .04, 0xe11d2e, 7.15, 2.55, -2.4);
-    for (let i = 0; i < 16; i++) { const x = -14 + i * 1.9 + Math.random(), h = 1 + Math.random() * 3; box(1.4, h, 1.2, [0x12382b, 0x174536, 0x0e2d22][i % 3], x, h / 2, -5.2 - Math.random() * 2); }
+    for (let i = 0; i < 16; i++) { const x = -14 + i * 1.9 + Math.random(), h = 1 + Math.random() * 3; box(1.4, h, 1.2, [0xb9a58f, 0xc7b4a0, 0xa89480][i % 3], x, h / 2, -5.2 - Math.random() * 2); }
     cam.position.set(0, 2.5, 8.5); cam.lookAt(0, .9, 0);
   }
 
@@ -176,11 +176,11 @@ function createScene(canvas, intro) {
 /* ================================================================== kirish (intro) */
 let banner = null, introScene = null;
 $('#introTitle').innerHTML = [...'MeatCity'].map((c, i) => `<span style="--i:${i}">${c}</span>`).join('');
-try { introScene = createScene($('#introCanvas'), true); } catch (e) { introScene = null; }
+try { introScene = window.createIntro ? createIntro($('#introCanvas')) : createScene($('#introCanvas'), true); } catch (e) { introScene = null; }
 try { banner = window.createBanner ? createBanner($('#bannerCanvas'), () => S.products) : null; } catch (e) { banner = null; }
 window.__bannerAdd = p => { S.cart[p.id] = (S.cart[p.id] || 0) + 1; saveCart(); toast('Savatga qo\'shildi'); };
 async function playIntro() {
-  await sleep(REDUCE ? 200 : 3000);
+  await sleep(REDUCE ? 200 : 3600);
   const el = $('#intro');
   if (REDUCE) { el.remove(); document.body.classList.remove('booting'); return; }
   document.body.classList.remove('booting');                                  // ilova kontenti chiqa boshlaydi
@@ -219,16 +219,19 @@ function setDock(name) {
   const btns = $$('button', dock).filter(b => !b.classList.contains('hidden'));
   btns.forEach(b => b.classList.toggle('on', b.dataset.d === name));
   requestAnimationFrame(() => {
-    const COLL = 57, GAP = 4, PAD = 6;               // yig'ilgan tugma kengligi (ikonka + padding)
+    const COLL = 57, GAP = 4, PAD = 6, mini = dock.classList.contains('mini');               // yig'ilgan tugma kengligi (ikonka + padding)
     let left = PAD;
     for (const b of btns) {
       const w = b.dataset.d === name ? COLL + 7 + $('span', b).scrollWidth : COLL;
-      if (b.dataset.d === name) { const blob = $('#dockBlob'); blob.style.width = w + 'px'; blob.style.transform = `translateX(${left - PAD}px)`; }
+      if (b.dataset.d === name) { const blob = $('#dockBlob'); blob.style.width = w + 'px'; blob.style.transform = `translateX(${mini ? 0 : left - PAD}px)`; }
       left += w + GAP;
     }
   });
 }
-$$('#dock button').forEach(b => b.onclick = () => { buzz(); ({ home, new: newOrder, admin: adminView })[b.dataset.d](); });
+const redock = () => { const on = $('#dock button.on'); on && setDock(on.dataset.d); };
+$$('#dock button').forEach(b => b.onclick = () => { buzz(); const dk = $('#dock'); if (dk.classList.contains('mini')) { dk.classList.remove('mini'); redock(); return; } ({ home, new: newOrder, admin: adminView })[b.dataset.d](); });
+// pastga aylantirilganda dock yig'iladi (faqat faol tugma qoladi), tepaga aylantirilsa yoki bosilsa ochiladi
+let lastY = 0; addEventListener('scroll', () => { const y = scrollY, d = y - lastY; lastY = y; const dk = $('#dock'); if (dk.classList.contains('hidden')) return; const m = dk.classList.contains('mini'); if (!m && d > 8 && y > 90) { dk.classList.add('mini'); redock(); } else if (m && d < -8) { dk.classList.remove('mini'); redock(); } }, { passive: true });
 addEventListener('resize', () => { const on = $('#dock button.on'); on && setDock(on.dataset.d); });
 
 /* ================================================================== bosh sahifa */
