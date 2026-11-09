@@ -30,3 +30,11 @@ Topikka oddiy a'zolar yozolmasligi uchun: topikni tahrirlab "faqat adminlar yoza
 ## Mahsulotlar (zakas bot bilan sinxron)
 Render → Environment: `DATABASE_URL` = zakas bot servisidagi AYNAN SHU nom/qiymat (Supabase bazasi). Ilova faqat o'qiydi (select).
 Narx/rasm/kategoriya zakas bot admin panelida o'zgarsa, ~45 soniyada bu yerda ham yangilanadi.
+
+
+## Sklad qoldig'i (ostatka) va kg/dona
+- Render env: `SD_LOGIN`, `SD_PASSWORD` (Sales Doctor), ixtiyoriy `SD_DOMAIN` (standart aslbarakadzk.salesdoc.io), `SD_WAREHOUSE` (faqat shu sklad), `SD_STOCK_METHOD`, `SD_INTERVAL` (soniya, standart 600).
+- Admin → "Sklad qoldig'i": «Sales Doctor'dan olish» yoki Excel (ustunlar: Наименование, Остаток, ixtiyoriy Ед.) yuklash.
+- Qoldiq yetmasa ham zakas yoziladi; tasdiqlash sahifasida "Yetmaydigan mahsulotlar" jadvali va har biriga izoh maydoni chiqadi, guruhga xabarda ham ⚠️ bilan ko'rsatiladi.
+- Admin mahsulot kartochkasidagi «dona/kg» tugmasi bilan birlikni belgilaydi (kg uchun qadam 0,5).
+- «Aa» tugmasi: katta/oddiy yozuv (standart — katta).

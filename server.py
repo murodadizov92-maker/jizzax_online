@@ -14,6 +14,7 @@ import os
 import re
 import sqlite3
 import time
+from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import parse_qsl, urljoin
 
@@ -35,6 +36,13 @@ PRODUCTS_TOKEN = os.getenv("PRODUCTS_TOKEN", "")  # kerak bo'lsa (Bearer)
 DB_PATH = os.getenv("DB_PATH", str(BASE / "data" / "online.db"))
 DEV = os.getenv("DEV") == "1"                 # faqat lokal sinov uchun
 SELF_URL = os.getenv("RENDER_EXTERNAL_URL", os.getenv("SELF_URL", ""))
+# Sales Doctor (sklad qoldig'i): login/parol faqat Render env'ga yoziladi, kodda yo'q
+SD_DOMAIN = os.getenv("SD_DOMAIN", "aslbarakadzk.salesdoc.io").replace("https://", "").strip("/ ")
+SD_LOGIN = os.getenv("SD_LOGIN", "")
+SD_PASSWORD = os.getenv("SD_PASSWORD", "")
+SD_STOCK_METHOD = os.getenv("SD_STOCK_METHOD", "getBalance")
+SD_WAREHOUSE = os.getenv("SD_WAREHOUSE", "").strip()        # ixtiyoriy: faqat shu sklad nomi
+SD_INTERVAL = int(os.getenv("SD_INTERVAL", "600"))          # soniya
 STATUSES = ["new", "collecting", "on_way", "delivered"]
 STATUS_TEXT = {
     "new": "🆕 Qabul qilindi",
@@ -60,9 +68,229 @@ CREATE TABLE IF NOT EXISTS orders(
   id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT,
   client_id INTEGER, client_name TEXT, region TEXT, items TEXT, total REAL,
   status TEXT DEFAULT 'new', comment TEXT, created INTEGER, updated INTEGER);
+CREATE TABLE IF NOT EXISTS stock(
+  key TEXT PRIMARY KEY, name TEXT, qty REAL, unit TEXT DEFAULT '', src TEXT, updated INTEGER);
+CREATE TABLE IF NOT EXISTS pmeta(pid TEXT PRIMARY KEY, unit TEXT);
 """
 )
 db.commit()
+
+
+# ---------------------------------------------------------------- SKLAD (ostatka)
+_stock = {"t": 0, "src": "", "rows": 0, "error": "", "ver": 0}
+_match_cache: dict = {}
+
+
+def pkey(name: str):
+    """Mahsulot nomini taqqoslash uchun: (harf skeleti, raqamlar to'plami). Kirill/lotin farqsiz."""
+    s = re.sub(r"\s*\*[^*]*\*\s*$", "", name or "")
+    s = re.sub(r"(?<=\d),(?=\d)", ".", s.lower())
+    nums = frozenset(re.findall(r"\d+(?:\.\d+)?", s))
+    return re.sub(r"[^a-z0-9]", "", translit(s)), nums
+
+
+def stock_index():
+    idx = {}
+    for r in db.execute("SELECT key,name,qty,unit FROM stock").fetchall():
+        k, nums = pkey(r["name"])
+        idx[r["key"]] = (k, nums, dict(r))
+    return idx
+
+
+def assign_stock(items: list, idx: dict) -> dict:
+    """Har bir sklad qatori faqat BITTA mahsulotga biriktiriladi (eng o'xshashiga); raqamlar (0,5 / 0,9 kg) bir xil bo'lishi shart."""
+    ck = (_stock["ver"], hash(tuple((p["id"], p["name"]) for p in items)))
+    if _match_cache.get("ck") == ck:
+        return _match_cache["map"]
+    by_nums: dict = {}
+    for key, (k2, n2, row) in idx.items():
+        by_nums.setdefault(n2, []).append((key, k2, row))
+    pairs = []
+    for p in items:
+        k, nums = pkey(p["name"])
+        if not k:
+            continue
+        for key, k2, row in by_nums.get(nums, []):
+            r = 1.0 if k == k2 else SequenceMatcher(None, k, k2).ratio()
+            if r >= 0.9:
+                pairs.append((r, p["id"], key, row))
+    pairs.sort(key=lambda x: -x[0])
+    used_p, used_s, res = set(), set(), {}
+    for r, pid, key, row in pairs:
+        if pid in used_p or key in used_s:
+            continue
+        used_p.add(pid)
+        used_s.add(key)
+        res[pid] = row
+    _match_cache.clear()
+    _match_cache.update(ck=ck, map=res)
+    return res
+
+
+def guess_unit(p: dict, stock_unit: str = "") -> str:
+    if re.match(r"\s*(кг|kg|килограмм)", (stock_unit or "").lower()):
+        return "kg"
+    return "kg" if re.search(r"\b(вес|весов|ves|vesovoy)", (p.get("name") or "").lower()) else "dona"
+
+
+def annotate(items: list) -> list:
+    idx = stock_index()
+    meta = {r["pid"]: r["unit"] for r in db.execute("SELECT pid,unit FROM pmeta").fetchall()}
+    out = []
+    amap = assign_stock(items, idx) if idx else {}
+    for p in items:
+        q = dict(p)
+        row = amap.get(p["id"])
+        q["stock"] = row["qty"] if row else None
+        q["stock_unit"] = (row["unit"] if row else "") or ""
+        q["unit"] = meta.get(p["id"]) or guess_unit(p, q["stock_unit"])
+        q["unit_set"] = p["id"] in meta
+        out.append(q)
+    return out
+
+
+def save_stock(rows: list, src: str):
+    """rows: [(name, qty, unit)] — bir xil nomlar yig'iladi (bir nechta sklad bo'lsa)."""
+    agg: dict = {}
+    for name, qty, unit in rows:
+        name = (name or "").strip()
+        if not name:
+            continue
+        k = re.sub(r"[^a-z0-9]", "", translit(name)) + "|" + "_".join(sorted(pkey(name)[1]))
+        if k in agg:
+            agg[k][1] += qty
+        else:
+            agg[k] = [name, qty, unit or ""]
+    db.execute("DELETE FROM stock")
+    t = now()
+    for k, (name, qty, unit) in agg.items():
+        db.execute("INSERT OR REPLACE INTO stock(key,name,qty,unit,src,updated) VALUES(?,?,?,?,?,?)", (k, name, qty, unit, src, t))
+    db.commit()
+    _stock.update(t=t, src=src, rows=len(agg), error="", ver=_stock["ver"] + 1)
+    _match_cache.clear()
+    return len(agg)
+
+
+_NAME_KEYS = ("product_name", "productname", "name", "title", "nomi", "наименование", "товар", "product")
+_QTY_KEYS = ("balance", "quantity", "qty", "amount", "count", "remain", "remains", "ostatok", "stock", "остаток", "количество")
+_UNIT_KEYS = ("measure", "unit", "measure_name", "unit_name", "ед", "birlik")
+
+
+def _find_rows(x):
+    if isinstance(x, list):
+        if x and all(isinstance(i, dict) for i in x):
+            return x
+        for i in x:
+            r = _find_rows(i)
+            if r:
+                return r
+    elif isinstance(x, dict):
+        for v in x.values():
+            r = _find_rows(v)
+            if r:
+                return r
+    return []
+
+
+def _kget(d: dict, keys):
+    low = {str(k).lower(): v for k, v in d.items()}
+    for k in keys:
+        if k in low and low[k] not in (None, ""):
+            return low[k]
+    return None
+
+
+def parse_sd_rows(data) -> list:
+    out = []
+    for r in _find_rows(data):
+        if SD_WAREHOUSE and SD_WAREHOUSE.lower() not in json.dumps(r, ensure_ascii=False).lower():
+            continue
+        name = _kget(r, _NAME_KEYS)
+        qty = _kget(r, _QTY_KEYS)
+        if isinstance(name, dict):
+            name = _kget(name, _NAME_KEYS)
+        if name is None or qty is None:
+            continue
+        unit = _kget(r, _UNIT_KEYS)
+        out.append((str(name), _num(qty), str(unit.get("name", "")) if isinstance(unit, dict) else str(unit or "")))
+    return out
+
+
+async def sd_call(method: str, params=None):
+    url = f"https://{SD_DOMAIN}/api/v1/"
+    body = {"auth": {"login": SD_LOGIN, "password": SD_PASSWORD}, "method": method, "params": params or {}}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as s:
+        async with s.post(url, json=body) as r:
+            return r.status, await r.text()
+
+
+async def sync_stock(debug=False):
+    if not (SD_LOGIN and SD_PASSWORD):
+        _stock["error"] = "SD_LOGIN / SD_PASSWORD kiritilmagan"
+        return {"ok": False, "error": _stock["error"]}
+    tried = []
+    for m in dict.fromkeys([SD_STOCK_METHOD, "getBalance", "getStock", "getRemains", "getProductBalance"]):
+        try:
+            st, txt = await sd_call(m)
+            data = json.loads(txt)
+        except Exception as e:
+            tried.append({"method": m, "error": str(e)[:200]})
+            continue
+        rows = parse_sd_rows(data)
+        tried.append({"method": m, "http": st, "rows": len(rows), "sample": txt[:600] if (debug or not rows) else ""})
+        if rows:
+            n = save_stock(rows, "sd")
+            return {"ok": True, "method": m, "rows": n, "tried": tried if debug else None}
+    _stock["error"] = "Sales Doctor javobidan qoldiq topilmadi"
+    return {"ok": False, "error": _stock["error"], "tried": tried}
+
+
+async def stock_loop():
+    if not (SD_LOGIN and SD_PASSWORD):
+        return
+    while True:
+        try:
+            r = await sync_stock()
+            log.info("stock sync: %s", {k: v for k, v in r.items() if k != "tried"})
+        except Exception as e:
+            _stock["error"] = str(e)[:200]
+            log.warning("stock sync failed: %s", e)
+        await asyncio.sleep(max(120, SD_INTERVAL))
+
+
+def read_stock_xlsx(data: bytes) -> list:
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    ws = wb.active
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    hdr_i, cn, cq, cu = None, None, None, None
+    for i, r in enumerate(rows[:15]):
+        low = [str(c or "").strip().lower() for c in r]
+        n = next((j for j, c in enumerate(low) if any(k in c for k in ("наимен", "товар", "nom", "mahsulot", "name", "продукт"))), None)
+        q = next((j for j, c in enumerate(low) if any(k in c for k in ("остат", "qoldiq", "ostatok", "кол", "qty", "balance", "stock", "сумма кол"))), None)
+        if n is not None and q is not None:
+            hdr_i, cn, cq = i, n, q
+            cu = next((j for j, c in enumerate(low) if c.startswith(("ед", "birlik", "unit", "o'lchov"))), None)
+            break
+    out = []
+    if hdr_i is None:                       # sarlavha topilmasa: birinchi matn ustuni + oxirgi son ustuni
+        for r in rows:
+            txt = [c for c in r if isinstance(c, str) and c.strip()]
+            nums = [c for c in r if isinstance(c, (int, float))]
+            if txt and nums:
+                out.append((txt[0], float(nums[-1]), ""))
+        return out
+    for r in rows[hdr_i + 1:]:
+        if cn >= len(r) or cq >= len(r) or not r[cn]:
+            continue
+        v = r[cq]
+        if isinstance(v, str):
+            v = _num(v)
+        if not isinstance(v, (int, float)):
+            continue
+        out.append((str(r[cn]), float(v), str(r[cu] or "") if cu is not None and cu < len(r) else ""))
+    return out
+
 
 # ---------------------------------------------------------------- yordamchilar
 _CYR = dict(zip(
@@ -278,8 +506,14 @@ async def notify_order(o: dict):
     lines = [f"🆕 <b>Zakas #{o['id']}</b>", f"👤 {o['client_name']}" + (f" ({o['region']})" if o["region"] else ""),
              f"🧑‍💼 {o['user_name']}", ""]
     for it in o["items"]:
-        lines.append(f"• {it['name']} × {it['qty']:g} = {money(it['price'] * it['qty'])}")
+        lines.append(f"• {it['name']} × {it['qty']:g} {it.get('unit', '')} = {money(it['price'] * it['qty'])}" + (" ⚠️" if it.get("short") else ""))
     lines += ["", f"💰 <b>Jami: {money(o['total'])} so'm</b>"]
+    short = [i for i in o["items"] if i.get("short")]
+    if short:
+        lines += ["", "⚠️ <b>Skladda yetmaydi:</b>"]
+        for i in short:
+            have = i.get("stock") or 0
+            lines.append(f"• {i['name']}: so'ralgan {i['qty']:g}, skladda {have:g} (yetmaydi {i['short']:g})" + (f"\n   ✍️ {i['note']}" if i.get("note") else ""))
     if o.get("comment"):
         lines.append(f"💬 {o['comment']}")
     await tg("sendMessage", text="\n".join(lines), parse_mode="HTML", **topic_params())
@@ -357,7 +591,46 @@ async def h_me_put(request):
 
 async def h_products(request):
     items = await get_products(force=request.query.get("force") == "1" and request["admin"])
-    return web.json_response({"items": items, "t": _cache["t"]})
+    return web.json_response({"items": annotate(items), "t": _cache["t"], "stock_t": _stock["t"]})
+
+
+async def h_unit(request):
+    need_admin(request)
+    u = (await request.json()).get("unit")
+    if u not in ("kg", "dona"):
+        return web.json_response({"error": "unit"}, status=400)
+    db.execute("INSERT OR REPLACE INTO pmeta(pid,unit) VALUES(?,?)", (request.match_info["id"], u))
+    db.commit()
+    return web.json_response({"ok": True})
+
+
+async def h_stock_status(request):
+    need_admin(request)
+    items = await get_products()
+    ann = annotate(items)
+    matched = sum(1 for p in ann if p["stock"] is not None)
+    return web.json_response({**_stock, "sd": bool(SD_LOGIN and SD_PASSWORD), "products": len(ann), "matched": matched,
+                              "unit_unset": sum(1 for p in ann if not p["unit_set"]),
+                              "unmatched": [p["name"] for p in ann if p["stock"] is None][:15]})
+
+
+async def h_stock_sync(request):
+    need_admin(request)
+    return web.json_response(await sync_stock(debug=request.query.get("debug") == "1"))
+
+
+async def h_stock_import(request):
+    need_admin(request)
+    r = await request.multipart()
+    f = await r.next()
+    data = await f.read(decode=False)
+    try:
+        rows = read_stock_xlsx(data)
+    except Exception as e:
+        return web.json_response({"error": f"Excel o'qilmadi: {e}"}, status=400)
+    if not rows:
+        return web.json_response({"error": "Fayldan qoldiq topilmadi (ustunlar: Наименование, Остаток)"}, status=400)
+    return web.json_response({"ok": True, "rows": save_stock(rows, "excel")})
 
 
 async def h_regions(request):
@@ -466,14 +739,18 @@ async def h_order_create(request):
     client = db.execute("SELECT * FROM clients WHERE id=?", (b.get("client_id"),)).fetchone()
     if not client:
         return web.json_response({"error": "Mijoz tanlanmagan"}, status=400)
-    catalog = {p["id"]: p for p in await get_products()}
+    catalog = {p["id"]: p for p in annotate(await get_products())}
     items, total = [], 0.0
     for it in b.get("items", []):
         p = catalog.get(str(it.get("id")))
         qty = _num(it.get("qty"))
         if not p or qty <= 0:
             continue
-        items.append({"id": p["id"], "name": p["name"], "price": p["price"], "qty": qty})  # narx serverdan — doim yangi
+        stk = p["stock"]
+        items.append({"id": p["id"], "name": p["name"], "price": p["price"], "qty": qty, "unit": p["unit"],
+                      "stock": stk, "stock_unit": p["stock_unit"],
+                      "short": round(max(0.0, qty - stk), 3) if stk is not None else 0,
+                      "note": str(it.get("note", ""))[:200]})  # narx va qoldiq serverdan — doim yangi
         total += p["price"] * qty
     if not items:
         return web.json_response({"error": "Savat bo'sh"}, status=400)
@@ -531,7 +808,10 @@ async def nocache_mw(request: web.Request, handler):
 
 async def on_start(app):
     reindex_clients()
-    app["tasks"] = [asyncio.create_task(poll_bot()), asyncio.create_task(keepalive())]
+    app["tasks"] = [asyncio.create_task(poll_bot()), asyncio.create_task(keepalive()), asyncio.create_task(stock_loop())]
+    r = db.execute("SELECT COUNT(*) c, MAX(updated) t FROM stock").fetchone()
+    if r["c"]:
+        _stock.update(rows=r["c"], t=r["t"] or 0, src="saqlangan")
 
 
 def make_app():
@@ -542,6 +822,10 @@ def make_app():
         web.get("/api/me", h_me),
         web.put("/api/me", h_me_put),
         web.get("/api/products", h_products),
+        web.put("/api/products/{id}/unit", h_unit),
+        web.get("/api/stock/status", h_stock_status),
+        web.post("/api/stock/sync", h_stock_sync),
+        web.post("/api/stock/import", h_stock_import),
         web.get("/api/regions", h_regions),
         web.get("/api/clients", h_clients),
         web.post("/api/clients/import", h_clients_import),

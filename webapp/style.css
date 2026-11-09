@@ -260,3 +260,36 @@ body{background:transparent}
 .intro-text>span{color:#ffe3c4;animation-delay:2.5s;text-shadow:0 2px 10px rgba(60,5,5,.5)}
 .intro-bar{background:rgba(255,255,255,.28)}
 .intro-bar i{background:linear-gradient(90deg,#fff3dc,#ffd08a);animation-delay:1s;animation-duration:2.4s}
+
+/* ---------- sklad qoldig'i, birlik, yetmaydigan jadval ---------- */
+.stk{display:inline-block;margin:2px 0 6px;padding:3px 9px;border-radius:10px;font-size:12px;font-weight:800}
+.stk.ok{background:rgba(34,160,90,.16);color:#14733d}.stk.low{background:rgba(238,122,47,.2);color:#b4540f}.stk.out{background:rgba(220,40,50,.16);color:#c01b2b}
+.qty .un{flex:none;font-style:normal;font-size:12px;font-weight:800;color:var(--mut);min-width:30px}
+.warn{display:none;margin:6px 0 0;padding:5px 8px;border-radius:10px;font-size:11.5px;font-weight:700;background:rgba(238,122,47,.18);color:#b4540f}.warn.on{display:block}
+.unitb{margin-left:6px;padding:2px 8px;border-radius:9px;border:1px solid rgba(255,255,255,.9);background:rgba(255,255,255,.75);color:var(--txt);font-size:11px;font-weight:800}
+.shortcard{border-color:rgba(238,122,47,.6)}
+.stbl{width:100%;border-collapse:collapse;font-size:13px}.stbl th{text-align:left;color:var(--mut);font-size:11px;padding:3px 4px}.stbl td{padding:5px 4px;vertical-align:top}.stbl td.bad{color:#c01b2b;font-weight:800}
+.stbl tr.nt td{padding:0 0 8px}.stbl tr.nt input{padding:9px 11px;font-size:14px}
+#aa{position:absolute;right:10px;top:8px;z-index:3;padding:6px 11px;border-radius:14px;border:1px solid rgba(255,255,255,.9);background:rgba(255,255,255,.75);color:var(--txt);font-weight:800;font-size:13px}
+
+/* ---------- KATTA REJIM (kattalar uchun): yirik yozuv, bitta ustunli ro'yxat, katta tugmalar ---------- */
+body.big{font-size:17px}
+body.big h2{font-size:24px}body.big .mut{font-size:15px}
+body.big .client{padding:17px 16px}body.big .client b{font-size:18.5px}
+body.big .btn{padding:18px;font-size:18px}body.big input,body.big textarea{padding:16px;font-size:18px}
+body.big .chip{padding:11px 17px;font-size:15.5px}body.big .tab{padding:14px;font-size:16px}
+body.big .stat b{font-size:26px}body.big .stat small{font-size:13px}
+body.big .grid{grid-template-columns:1fr;gap:14px}
+body.big .prod{display:grid;grid-template-columns:128px 1fr;align-items:stretch}
+body.big .prod .im{aspect-ratio:auto;min-height:150px}
+body.big .prod .tag{display:none}body.big .prod .play{font-size:11px;padding:4px 8px}
+body.big .prod .in{padding:12px 12px 14px}
+body.big .prod .nm{font-size:17px;min-height:0;line-height:1.3}body.big .prod .pr{font-size:18px;margin:4px 0}
+body.big .stk{font-size:14.5px;padding:4px 10px}
+body.big .qty button{width:52px;height:52px;font-size:26px;border-radius:15px}
+body.big .qty input{font-size:20px;padding:12px 2px}body.big .qty .un{font-size:14px}
+body.big .add{padding:14px;font-size:17px;border-radius:14px}
+body.big .warn{font-size:13.5px}
+body.big #cartBtn{padding:19px;font-size:18px}
+body.big .stbl{font-size:15px}body.big .badge{font-size:14px}
+body.big .steps span{font-size:13.5px}

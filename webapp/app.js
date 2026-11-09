@@ -190,9 +190,17 @@ async function playIntro() {
 playIntro();
 
 /* ================================================================== holat */
-const S = { me: null, products: [], cat: 'Hammasi', q: '', cart: JSON.parse(localStorage.getItem('cart') || '{}'), client: null, region: '', tab: 'all', timer: null, stats: { n: 0, sum: 0, way: 0 } };
+const S = { notes: {}, me: null, products: [], cat: 'Hammasi', q: '', cart: JSON.parse(localStorage.getItem('cart') || '{}'), client: null, region: '', tab: 'all', timer: null, stats: { n: 0, sum: 0, way: 0 } };
 const saveCart = () => { try { localStorage.setItem('cart', JSON.stringify(S.cart)); } catch (e) {} };
 const view = $('#view');
+const stepOf = p => p && p.unit === 'kg' ? .5 : 1;
+const fq = v => (+v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+const stockInfo = p => {                                   // {cls, text} yoki null (qoldiq noma'lum bo'lsa)
+  if (p.stock == null) return null; const u = p.stock_unit || (p.unit === 'kg' ? 'kg' : 'dona');
+  if (p.stock <= 0) return { cls: 'out', text: '❌ Skladda yo\'q' };
+  return { cls: p.stock <= (p.unit === 'kg' ? 10 : 5) ? 'low' : 'ok', text: `📦 Skladda: ${fq(p.stock)} ${u}` };
+};
+const shortOf = (p, q) => p && p.stock != null && q > p.stock ? Math.max(0, +(q - p.stock).toFixed(3)) : 0;
 function render(html) { view.innerHTML = html; animateIn(view); scrollTo({ top: 0 }); }
 let backFn = null;
 function setBack(fn) {
@@ -284,8 +292,9 @@ function detail(o) {
     <h2 data-a>Zakas #${o.id}</h2>
     <div class="card" data-a><b>${esc(o.client_name)}</b><div class="mut">${esc(o.region || '')}</div>
       <div class="track"><i id="trk"></i>${keys.map((k, n) => `<span class="${n <= idx ? 'on' : ''}"><b>${n < idx ? '✓' : n + 1}</b>${ST[k][0].replace(/^\S+\s/, '')}</span>`).join('')}</div></div>
-    <div class="card" data-a>${o.items.map(i => `<div class="row" style="margin:6px 0"><span>${esc(i.name)} × ${i.qty}</span><b>${money(i.price * i.qty)}</b></div>`).join('')}
+    <div class="card" data-a>${o.items.map(i => `<div class="row" style="margin:6px 0"><span>${esc(i.name)} × ${fq(i.qty)} ${i.unit || ''}${i.short ? ' ⚠️' : ''}</span><b>${money(i.price * i.qty)}</b></div>`).join('')}
       <hr style="border:0;border-top:1px solid var(--line)"><div class="row"><span>Jami</span><span class="sum"><span id="tot">0</span> so'm</span></div></div>
+    ${o.items.some(i => i.short) ? `<div class="card shortcard" data-a><b>⚠️ Skladda yetmagan</b><table class="stbl"><tr><th>Mahsulot</th><th>So'ralgan</th><th>Skladda</th><th>Yetmaydi</th></tr>${o.items.filter(i => i.short).map(i => `<tr><td>${esc(i.name)}</td><td>${fq(i.qty)}</td><td>${fq(i.stock || 0)}</td><td class="bad">${fq(i.short)}</td></tr>${i.note ? `<tr class="nt"><td colspan="4">✍️ ${esc(i.note)}</td></tr>` : ''}`).join('')}</table></div>` : ''}
     ${o.comment ? `<div class="card mut" data-a>💬 ${esc(o.comment)}</div>` : ''}
     ${S.me.admin ? `<div class="card" data-a><div class="mut" style="margin-bottom:8px">Holatni o'zgartirish (admin)</div>
       <div class="chips" style="flex-wrap:wrap">${keys.map(k => `<div class="chip ${k === o.status ? 'on' : ''}" data-s="${k}">${ST[k][0]}</div>`).join('')}</div>
@@ -352,16 +361,21 @@ async function pickProducts() {
   const cardHtml = p => `
       <div class="prod ${S.cart[p.id] ? 'sel' : ''}" data-id="${p.id}">
         <div class="im ${p.image ? 'has' : ''}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('ok')" onerror="this.remove()">` : '🥩'}<span class="tag">${esc(p.category)}</span>${p.image ? '<span class="play">▶ Reklama</span>' : ''}</div>
-        <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm${p.unit ? ' / ' + esc(p.unit) : ''}</div>
-          <div class="qty"><button data-d="-1">−</button><input type="number" inputmode="decimal" min="0" step="any" value="${S.cart[p.id] || ''}" placeholder="0"><button data-d="1">+</button></div>
+        <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm / ${p.unit === 'kg' ? 'kg' : 'dona'}${S.me && S.me.admin ? `<button class="unitb" title="kg/dona">${p.unit === 'kg' ? '⚖️ kg' : '🔢 dona'}${p.unit_set ? '' : ' ?'}</button>` : ''}</div>
+          ${(() => { const s = stockInfo(p); return s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''; })()}
+          <div class="qty"><button data-d="-1">−</button><input type="number" inputmode="decimal" min="0" step="any" value="${S.cart[p.id] || ''}" placeholder="0"><button data-d="1">+</button><i class="un">${p.unit === 'kg' ? 'kg' : 'dona'}</i></div>
+          <div class="warn ${shortOf(p, S.cart[p.id]) ? 'on' : ''}">⚠️ Yetmaydi: ${fq(shortOf(p, S.cart[p.id]))} · zakas baribir yoziladi</div>
           <button class="add">Savatga</button></div>
       </div>`;
   const bindCard = (card, p) => {
     const id = card.dataset.id, inp = $('input', card);
-    const set = v => { v = Math.max(0, +v || 0); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); saveCart(); updateCartBar(true); buzz(); };
-    $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d));
+    const warn = $('.warn', card);
+    const set = v => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); const sh = shortOf(p, v); warn.classList.toggle('on', !!sh); warn.textContent = `⚠️ Yetmaydi: ${fq(sh)} · zakas baribir yoziladi`; saveCart(); updateCartBar(true); buzz(); };
+    $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d * stepOf(p)));
+    const ub = $('.unitb', card);
+    if (ub) ub.onclick = async e => { e.stopPropagation(); const nu = p.unit === 'kg' ? 'dona' : 'kg'; try { await api(`/api/products/${p.id}/unit`, { method: 'PUT', json: { unit: nu } }); p.unit = nu; p.unit_set = true; const real = S.products.find(x => x.id === p.id); if (real) { real.unit = nu; real.unit_set = true; } toast(`${p.name}: ${nu}`); draw(); } catch (er) { toast(er.message); } };
     inp.onchange = () => set(inp.value);
-    $('.add', card).onclick = () => { if (!+inp.value) set(1); fly($('.im', card)); };
+    $('.add', card).onclick = () => { if (!+inp.value) set(stepOf(p) === .5 ? 1 : 1); fly($('.im', card)); };
     if (p.image) $('.im', card).onclick = () => {
       buzz('medium'); const prev = backFn;
       setBack(() => window.__adClose && window.__adClose()); window.__adBack = () => setBack(prev);
@@ -410,23 +424,29 @@ function confirmView() {
     render(`
       <div class="steps" data-a><span>1. Mijoz</span><span>2. Mahsulot</span><span class="on">3. Tasdiq</span></div>
       <div class="card" data-a><b>${esc(S.client.name)}</b><div class="mut">${S.client.agent ? '🧑‍💼 ' + esc(S.client.agent) : ''} ${esc(S.client.region)}</div></div>
-      ${rows.map(r => `<div class="card" data-a><div class="row"><b>${esc(r.p.name)}</b><button class="back" data-rm="${r.id}">✕</button></div>
-        <div class="row"><span class="mut">${money(r.p.price)} × </span><div class="qty" style="width:150px"><button data-m="${r.id}">−</button><input type="number" step="any" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button></div><b>${money(r.p.price * r.q)}</b></div></div>`).join('') || '<div class="mut" data-a>Savat bo\'sh</div>'}
+      ${rows.map(r => { const s = stockInfo(r.p), sh = shortOf(r.p, r.q); return `<div class="card" data-a><div class="row"><b>${esc(r.p.name)}</b><button class="back" data-rm="${r.id}">✕</button></div>
+        ${s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''}
+        <div class="row"><span class="mut">${money(r.p.price)} × </span><div class="qty" style="flex:1;max-width:240px;margin:0 8px"><button data-m="${r.id}">−</button><input type="number" step="any" inputmode="decimal" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button><i class="un">${r.p.unit === 'kg' ? 'kg' : 'dona'}</i></div><b>${money(r.p.price * r.q)}</b></div></div>`; }).join('') || '<div class="mut" data-a>Savat bo\'sh</div>'}
+      ${(() => { const sr = rows.filter(r => shortOf(r.p, r.q)); return sr.length ? `<div class="card shortcard" data-a><b>⚠️ Skladda yetmaydigan mahsulotlar</b>
+        <div class="mut" style="margin:4px 0 8px">Zakas baribir yoziladi. Yetmasa nima qilish kerakligini izohda yozing (masalan: "boshqa turidan bering").</div>
+        <table class="stbl"><tr><th>Mahsulot</th><th>So'ralgan</th><th>Skladda</th><th>Yetmaydi</th></tr>
+        ${sr.map(r => `<tr><td>${esc(r.p.name)}</td><td>${fq(r.q)}</td><td>${fq(Math.max(0, r.p.stock))}</td><td class="bad">${fq(shortOf(r.p, r.q))}</td></tr><tr class="nt"><td colspan="4"><input data-n="${r.id}" placeholder="✍️ Izoh: yo'q bo'lsa nima qilamiz?" value="${esc(S.notes[r.id] || '')}"></td></tr>`).join('')}</table></div>` : ''; })()}
       <textarea id="cm" rows="2" placeholder="💬 Izoh (ixtiyoriy)" data-a></textarea>
       <div class="row" style="margin:14px 0" data-a><span>Jami</span><span class="sum"><span id="tot">0</span> so'm</span></div>
       <button class="btn" id="send" data-a ${rows.length ? '' : 'disabled'}>✅ Zakasni yuborish</button>`);
     countTo($('#tot'), cartSum(), { dur: 700 });
-    const chg = (id, v) => { v = Math.max(0, +v || 0); if (v) S.cart[id] = v; else delete S.cart[id]; saveCart(); buzz(); draw(); };
+    const chg = (id, v) => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; saveCart(); buzz(); draw(); };
+    $$('[data-n]').forEach(i => i.oninput = () => { S.notes[i.dataset.n] = i.value; });
     $$('[data-rm]').forEach(b => b.onclick = () => chg(b.dataset.rm, 0));
-    $$('[data-m]').forEach(b => b.onclick = () => chg(b.dataset.m, S.cart[b.dataset.m] - 1));
-    $$('[data-p]').forEach(b => b.onclick = () => chg(b.dataset.p, S.cart[b.dataset.p] + 1));
+    $$('[data-m]').forEach(b => b.onclick = () => chg(b.dataset.m, S.cart[b.dataset.m] - stepOf(S.products.find(p => p.id === b.dataset.m))));
+    $$('[data-p]').forEach(b => b.onclick = () => chg(b.dataset.p, S.cart[b.dataset.p] + stepOf(S.products.find(p => p.id === b.dataset.p))));
     $$('[data-i]').forEach(i => i.onchange = () => chg(i.dataset.i, i.value));
     $('#send').onclick = async () => {
       $('#send').disabled = true;
       try {
-        const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty }));
+        const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty, note: S.notes[id] || '' }));
         const { order } = await api('/api/orders', { method: 'POST', json: { client_id: S.client.id, items, comment: $('#cm').value } });
-        S.cart = {}; saveCart(); S.client = null; buzz('heavy'); confetti(); toast('Zakas yuborildi ✅');
+        S.cart = {}; S.notes = {}; saveCart(); S.client = null; buzz('heavy'); confetti(); toast('Zakas yuborildi ✅');
         S.tab = 'mine'; detail(order); banner && banner.setProgress(ST.new[1]);
       } catch (e) { toast(e.message); $('#send').disabled = false; }
     };
@@ -444,6 +464,10 @@ function adminView() {
     <div class="card" data-a><b>Mijoz qo'shish</b>
       <input id="n" placeholder="Nomi" style="margin-top:8px"><input id="ph" placeholder="Telefon" style="margin-top:6px"><input id="rg" placeholder="Hudud" style="margin-top:6px"><input id="ad" placeholder="Manzil" style="margin-top:6px">
       <button class="btn sec small" id="addc" style="margin-top:8px">➕ Qo'shish</button></div>
+    <div class="card" data-a><b>📦 Sklad qoldig'i (ostatka)</b><div class="mut" id="stinfo">Yuklanmoqda…</div>
+      <button class="btn sec small" id="stsd" style="margin-top:8px">🔄 Sales Doctor'dan olish</button>
+      <div style="margin-top:8px"><input type="file" id="stx" accept=".xlsx"><button class="btn sec small" id="stup" style="margin-top:8px">📥 Excel'dan yuklash</button></div>
+      <div class="mut" id="stdbg" style="margin-top:8px;white-space:pre-wrap;word-break:break-all;font-size:11px"></div></div>
     <div class="card" data-a><b>Mahsulotlarni yangilash</b><div class="mut">Narx/rasm zakas bot'dan avtomatik olinadi (har ~45 soniyada).</div><button class="btn sec small" id="sync" style="margin-top:8px">🔄 Hozir yangilash</button></div>`);
   $('#up').onclick = async () => {
     const f = $('#xl').files[0]; if (!f) return toast('Fayl tanlang');
@@ -453,8 +477,25 @@ function adminView() {
   $('#addc').onclick = async () => {
     try { await api('/api/clients', { method: 'POST', json: { name: $('#n').value, phone: $('#ph').value, region: $('#rg').value, address: $('#ad').value } }); toast('Qo\'shildi'); S.me = await api('/api/me'); adminView(); } catch (e) { toast(e.message); }
   };
+  const stInfo = async () => {
+    try { const s = await api('/api/stock/status');
+      $('#stinfo').innerHTML = `Mahsulotlar: ${s.products} ta · qoldig'i topilgan: <b>${s.matched}</b> ta · sklad qatorlari: ${s.rows}<br>${s.t ? 'Oxirgi yangilanish: ' + new Date(s.t * 1000).toLocaleString('uz') + ' (' + esc(s.src) + ')' : 'Hali yuklanmagan'}${s.sd ? '' : '<br>⚠️ Sales Doctor ulanmagan (SD_LOGIN / SD_PASSWORD)'}${s.error ? '<br>⚠️ ' + esc(s.error) : ''}<br>Kg/dona belgilanmagan: ${s.unit_unset} ta (mahsulot kartochkasida belgilang)${s.unmatched.length ? '<br><span style="opacity:.8">Qoldig\'i topilmaganlar: ' + s.unmatched.slice(0, 6).map(esc).join('; ') + '…</span>' : ''}`;
+    } catch (e) { $('#stinfo').textContent = e.message; }
+  };
+  stInfo();
+  $('#stsd').onclick = async () => { $('#stdbg').textContent = '…'; try { const r = await api('/api/stock/sync?debug=1', { method: 'POST' }); $('#stdbg').textContent = r.ok ? `✅ ${r.rows} ta qator (${r.method})` : `❌ ${r.error}\n` + JSON.stringify(r.tried || [], null, 1).slice(0, 900); S.products = (await api('/api/products')).items; stInfo(); } catch (e) { $('#stdbg').textContent = e.message; } };
+  $('#stup').onclick = async () => { const f = $('#stx').files[0]; if (!f) return toast('Fayl tanlang'); const fd = new FormData(); fd.append('file', f); try { const r = await api('/api/stock/import', { method: 'POST', body: fd }); toast(`${r.rows} ta qator yuklandi`); S.products = (await api('/api/products')).items; stInfo(); } catch (e) { toast(e.message); } };
   $('#sync').onclick = async () => { try { S.products = (await api('/api/products?force=1')).items; toast(`${S.products.length} ta mahsulot`); } catch (e) { toast(e.message); } };
 }
+
+/* ================================================================== katta yozuv (kattalar uchun) */
+(function () {
+  let big = '1'; try { big = localStorage.getItem('big') || '1'; } catch (e) {}
+  const apply = () => { document.body.classList.toggle('big', big === '1'); const b = $('#aa'); if (b) b.textContent = big === '1' ? 'Aa −' : 'Aa +'; };
+  const btn = document.createElement('button'); btn.id = 'aa'; btn.setAttribute('aria-label', 'Yozuv o\'lchami'); $('#top').appendChild(btn);
+  btn.onclick = e => { e.stopPropagation(); big = big === '1' ? '0' : '1'; try { localStorage.setItem('big', big); } catch (er) {} apply(); buzz(); };
+  apply();
+})();
 
 /* ================================================================== start */
 (async () => {
