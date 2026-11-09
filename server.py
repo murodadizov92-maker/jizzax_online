@@ -664,7 +664,9 @@ async def h_products(request):
 
 async def h_users(request):
     need_admin(request)
-    rows = db.execute("SELECT u.tg_id,u.name,u.username,u.last_seen,a.agent FROM users u LEFT JOIN access a ON a.tg_id=u.tg_id ORDER BY (a.agent IS NULL), u.last_seen DESC LIMIT 200").fetchall()
+    rows = db.execute("SELECT a.tg_id AS tg_id, COALESCE(u.name,'(hali kirmagan)') AS name, u.username AS username, u.last_seen AS last_seen, a.agent AS agent FROM access a LEFT JOIN users u ON u.tg_id=a.tg_id "
+                      "UNION ALL SELECT u.tg_id,u.name,u.username,u.last_seen,NULL FROM users u WHERE u.tg_id NOT IN (SELECT tg_id FROM access)").fetchall()
+    rows = sorted(rows, key=lambda r: (r["agent"] is None, -(r["last_seen"] or 0)))[:300]
     agents = [r["agent"] for r in db.execute("SELECT agent FROM clients WHERE agent!='' GROUP BY agent ORDER BY COUNT(*) DESC").fetchall()]
     return web.json_response({"items": [{**dict(r), "admin": r["tg_id"] in ADMIN_IDS} for r in rows], "agents": agents})
 

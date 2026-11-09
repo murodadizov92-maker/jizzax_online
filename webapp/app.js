@@ -468,6 +468,8 @@ async function loadUsers() {
     const { items, agents } = await api('/api/users');
     box.innerHTML = items.map(u => `<div style="display:flex;gap:8px;align-items:center;margin:6px 0"><div style="flex:1;min-width:0"><b>${esc(u.name)}</b>${u.admin ? ' 👑' : ''}<div class="mut" style="font-size:12px">${u.username ? '@' + esc(u.username) + ' · ' : ''}${u.tg_id}</div></div>
       <select data-u="${u.tg_id}" style="max-width:48%"><option value="">🚫 Ruxsat yo'q</option>${agents.map(g => `<option ${u.agent === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>`).join('') || '<div class="mut">Hali hech kim kirmagan</div>';
+    $('#nag').innerHTML = '<option value="">Agentni tanlang</option>' + agents.map(g => `<option>${esc(g)}</option>`).join('');
+    $('#nadd').onclick = async () => { const id = $('#nid').value.replace(/\D/g, ''), ag = $('#nag').value; if (!id || !ag) return toast('ID va agentni kiriting'); try { await api('/api/users/' + id + '/access', { method: 'PUT', json: { agent: ag } }); toast('Qo\'shildi'); loadUsers(); } catch (e) { toast(e.message); } };
     box.querySelectorAll('select').forEach(s => s.onchange = async () => { try { await api('/api/users/' + s.dataset.u + '/access', { method: 'PUT', json: { agent: s.value } }); toast(s.value ? 'Ruxsat berildi' : 'Ruxsat olib tashlandi'); } catch (e) { toast(e.message); } });
   } catch (e) { box.textContent = e.message; }
 }
@@ -475,7 +477,10 @@ function adminView() {
   clearTimer(); setBack(home); updateCartBar(false); setDock('admin');
   render(`
     <h2 data-a>⚙️ Admin</h2>
-    <div class="card" data-a><b>👥 Foydalanuvchilar</b><div class="mut">Agentni Telegram foydalanuvchisiga bog'lang. Bog'langan agent zakas bera oladi va faqat o'z mijozlarini ko'radi; guruhga agent nomi bilan boradi.</div><div id="usr" style="margin-top:8px">...</div></div>
+    <div class="card" data-a><b>👥 Foydalanuvchilar</b><div class="mut">Agentni Telegram foydalanuvchisiga bog'lang. Bog'langan agent zakas bera oladi va faqat o'z mijozlarini ko'radi; guruhga agent nomi bilan boradi.</div><div id="usr" style="margin-top:8px">...</div>
+      <div style="margin-top:10px;border-top:1px solid rgba(0,0,0,.08);padding-top:10px"><b style="font-size:14px">➕ ID bo'yicha qo'shish</b>
+      <input id="nid" inputmode="numeric" placeholder="Telegram ID (masalan 7553654583)" style="margin-top:6px"><select id="nag" style="margin-top:6px;width:100%"></select>
+      <button class="btn sec small" id="nadd" style="margin-top:8px">✅ Ruxsat berish</button></div></div>
     <div class="card" data-a><b>Mijozlar bazasi</b><div class="mut">Hozir: ${S.me.clients} ta. Sales Doctor Excel: ИД клиента, Название клиента, Агент, Территория</div>
       <input type="file" id="xl" accept=".xlsx" style="margin-top:8px"><button class="btn sec small" id="up" style="margin-top:8px">📥 Excel yuklash</button></div>
     <div class="card" data-a><b>Mijoz qo'shish</b>
