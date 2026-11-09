@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS orders(
 CREATE TABLE IF NOT EXISTS stock(
   key TEXT PRIMARY KEY, name TEXT, qty REAL, unit TEXT DEFAULT '', src TEXT, updated INTEGER);
 CREATE TABLE IF NOT EXISTS pmeta(pid TEXT PRIMARY KEY, unit TEXT);
+CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
 """
 )
 db.commit()
@@ -174,7 +175,17 @@ def save_stock(rows: list, src: str):
 # Sales Doctor API v2 (https://github.com/Clever91/salesdoc-api-doc): POST https://{domain}/api/v2
 #   1) {"method":"login","auth":{"login","password"}} -> result.userId, result.token
 #   2) {"method":"getStock","auth":{"userId","token"},"params":{...}} -> result: sklad -> products[].name / quantity
-_sd = {"auth": None}
+_sd = {"auth": None, "block": 0, "url": None}
+
+
+def kv_get(k):
+    r = db.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
+    return r["v"] if r else None
+
+
+def kv_set(k, v):
+    db.execute("INSERT OR REPLACE INTO kv(k,v) VALUES(?,?)", (k, v))
+    db.commit()
 
 
 SD_HEADERS = {
@@ -184,10 +195,12 @@ SD_HEADERS = {
 
 
 async def sd_post(body: dict):
-    """nginx ba'zan oddiy Python User-Agent'ni 403 bilan to'xtatadi — brauzer sarlavhalari bilan yuboramiz; 403 bo'lsa '/' bilan qayta."""
+    """nginx ba'zan oddiy Python User-Agent'ni 403 bilan to'xtatadi — brauzer sarlavhalari bilan yuboramiz.
+    Ishlagan manzil eslab qolinadi; keraksiz qayta so'rovlar yo'q (Sales Doctor 429 limiti bor)."""
+    urls = [_sd["url"]] if _sd["url"] else [SD_URL, SD_URL + "/"]
     last = (0, None, "")
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90), headers=SD_HEADERS) as s:
-        for url in (SD_URL, SD_URL + "/"):
+        for url in urls:
             async with s.post(url, json=body) as r:
                 txt = await r.text()
                 try:
@@ -195,7 +208,10 @@ async def sd_post(body: dict):
                 except Exception:
                     data = None
                 last = (r.status, data, txt)
-                if r.status != 403:
+                if r.status == 429:
+                    _sd["block"] = now() + 900
+                if r.status not in (403, 404):
+                    _sd["url"] = url
                     return last
     return last
 
@@ -204,8 +220,11 @@ async def sd_login():
     st, data, txt = await sd_post({"method": "login", "auth": {"login": SD_LOGIN, "password": SD_PASSWORD}})
     res = (data or {}).get("result") or {}
     if not res.get("token"):
+        if st == 429:
+            raise RuntimeError("Sales Doctor so'rovlar limitini to'ldirdi (429). 15 daqiqa kuting, tugmani qayta-qayta bosmang.")
         raise RuntimeError(f"Sales Doctor login xato (HTTP {st}): {(txt or '')[:300]}")
     _sd["auth"] = {"userId": res.get("userId"), "token": res["token"]}
+    kv_set("sd_auth", json.dumps(_sd["auth"]))
 
 
 def parse_stock(node, wh="", out=None):
@@ -231,11 +250,18 @@ async def sd_get_all(method: str, params=None):
     for page in range(1, 40):
         for attempt in range(2):
             if not _sd["auth"]:
+                try:
+                    _sd["auth"] = json.loads(kv_get("sd_auth") or "null")     # restartdan keyin ham eski token ishlatiladi (qayta login qilmaymiz)
+                except Exception:
+                    _sd["auth"] = None
+            if not _sd["auth"]:
                 await sd_login()
             st, data, txt = await sd_post({"method": method, "auth": _sd["auth"], "params": {**(params or {}), "limit": 1000, "page": page}})
             err = ((data or {}).get("error") or {}) if isinstance(data, dict) else {}
             if err.get("code") == 401 and attempt == 0:
                 _sd["auth"] = None
+                kv_set("sd_auth", "null")
+                await sd_login()
                 continue
             break
         last = (st, txt)
@@ -257,6 +283,9 @@ async def sync_stock(debug=False):
     if not (SD_LOGIN and SD_PASSWORD):
         _stock["error"] = "SD_LOGIN / SD_PASSWORD kiritilmagan"
         return {"ok": False, "error": _stock["error"]}
+    if now() < _sd["block"]:
+        _stock["error"] = f"Sales Doctor limiti: {max(1, (_sd['block'] - now()) // 60)} daqiqadan keyin urinib ko'ring"
+        return {"ok": False, "error": _stock["error"]}
     try:
         rows, last = await sd_get_all("getStock")
     except Exception as e:
@@ -273,14 +302,20 @@ async def sync_stock(debug=False):
 async def stock_loop():
     if not (SD_LOGIN and SD_PASSWORD):
         return
+    if _stock["t"] and now() - _stock["t"] < SD_INTERVAL:
+        await asyncio.sleep(SD_INTERVAL - (now() - _stock["t"]))
     while True:
+        wait = max(120, SD_INTERVAL)
         try:
             r = await sync_stock()
             log.info("stock sync: %s", {k: v for k, v in r.items() if k != "tried"})
+            if not r.get("ok"):
+                wait = max(wait, 1800)          # xato bo'lsa 30 daqiqa kutamiz (limitga urilmaslik uchun)
         except Exception as e:
             _stock["error"] = str(e)[:200]
             log.warning("stock sync failed: %s", e)
-        await asyncio.sleep(max(120, SD_INTERVAL))
+            wait = max(wait, 1800)
+        await asyncio.sleep(wait)
 
 
 def read_stock_xlsx(data: bytes) -> list:
