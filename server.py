@@ -584,6 +584,21 @@ async def notify_order(o: dict):
     if o.get("comment"):
         lines.append(f"💬 {o['comment']}")
     await tg("sendMessage", text="\n".join(lines), parse_mode="HTML", **topic_params())
+    try:                                           # накладная (JPG) — xuddi chop etiladigan ko'rinishda
+        from invoice import make_invoice
+        jpg = await asyncio.get_running_loop().run_in_executor(None, make_invoice, o)
+        form = aiohttp.FormData()
+        for k, v in topic_params().items():
+            form.add_field(k, str(v))
+        form.add_field("caption", f"📄 Накладная — Zakas #{o['id']}")
+        form.add_field("photo", jpg, filename=f"nakladnoy_{o['id']}.jpg", content_type="image/jpeg")
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as s:
+            async with s.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto", data=form) as r:
+                res = await r.json()
+                if not res.get("ok"):
+                    log.warning("sendPhoto: %s", res)
+    except Exception as e:
+        log.warning("nakladnoy failed: %s", e)
 
 
 async def poll_bot():
