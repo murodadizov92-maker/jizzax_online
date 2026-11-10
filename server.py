@@ -305,12 +305,52 @@ def _agent_name(v):
     return str(v or "").split("(")[0].strip()
 
 
+def _scan_agent(d: dict) -> str:
+    """Kalit nomida 'agent' bor har qanday maydondan ism qidiradi (matnli, nomsiz ID emas)."""
+    for k, v in d.items():
+        if "agent" in str(k).lower() and "id" not in str(k).lower().replace("agent", ""):
+            n = _agent_name(v)
+            if n and not re.fullmatch(r"[\w-]{1,12}", n) or (n and " " in n):
+                return n
+    return ""
+
+
+def _agent_id(d: dict) -> str:
+    for k, v in d.items():
+        kl = str(k).lower()
+        if "agent" in kl and isinstance(v, (str, int)) and str(v):
+            return str(v)
+        if "agent" in kl and isinstance(v, dict):
+            x = _first(v, ("SD_id", "id", "ID", "agent_id"))
+            if x:
+                return str(x)
+    return ""
+
+
+def parse_named(node, out=None):
+    """getAgent kabi javoblardan {id: ism}."""
+    out = {} if out is None else out
+    if isinstance(node, list):
+        for v in node:
+            if isinstance(v, dict) and (v.get("name") or v.get("fio") or v.get("NAME")):
+                for k in ("SD_id", "id", "ID", "agent_id", "CS_id", "code"):
+                    if v.get(k) not in (None, ""):
+                        out[str(v[k])] = _agent_name(_first(v, ("name", "fio", "NAME")))
+            else:
+                parse_named(v, out)
+    elif isinstance(node, dict):
+        for v in node.values():
+            parse_named(v, out)
+    return out
+
+
 def client_fields(d: dict) -> dict:
     name = _first(d, ("name", "CS_name", "clientName", "client_name", "title", "NAME"))
     return {
         "ext": str(_first(d, ("CS_id", "client_id", "clientId", "SD_id", "id", "code", "ID")) or ""),
         "name": str(name or "").strip(),
-        "agent": _agent_name(_first(d, ("agent", "agents", "agentName", "agent_name", "AGENT", "agent_id_name"))),
+        "agent": _agent_name(_first(d, ("agent", "agents", "agentName", "agent_name", "AGENT", "agent_id_name"))) or _scan_agent(d),
+        "agent_id": _agent_id(d),
         "region": str(_agent_name(_first(d, ("territory", "region", "city", "TERRITORY"))) or ""),
         "phone": str(_first(d, ("phone", "tel", "phoneNumber", "mobile", "PHONE")) or ""),
         "address": str(_first(d, ("address", "ADDRESS", "adress")) or ""),
@@ -344,15 +384,30 @@ async def sync_clients():
         return {"ok": False, "error": str(e)[:300]}
     if not raw:
         return {"ok": False, "error": "getClient javobida mijoz topilmadi", "sample": (last[1] or "")[:600] if last else ""}
+    amap = {}
+    if any(not client_fields(d)["agent"] and client_fields(d)["agent_id"] for d in raw):
+        for m in ("getAgent", "getAgents"):                      # agent faqat ID bilan kelsa — nomini alohida olamiz
+            try:
+                rows_a, _ = await sd_get_all(m, parser=lambda n: [parse_named(n)])
+                for dct in rows_a:
+                    amap.update(dct)
+                if amap:
+                    break
+            except Exception as e:
+                log.info("%s: %s", m, e)
     known = {r["agent"] for r in db.execute("SELECT DISTINCT agent FROM clients WHERE agent!=''").fetchall()}
     want = [norm(a) for a in SD_AGENTS]
     if want:
         known = None          # SD_AGENTS berilgan — shu agentlar bo'yicha filtr (kirill/lotin, Ғ/Г farqsiz)
-    added = upd = skipped = 0
+    added = upd = skipped = noagent = 0
     for d in raw:
         f = client_fields(d)
         if not f["name"]:
             continue
+        if not f["agent"] and f["agent_id"]:
+            f["agent"] = amap.get(f["agent_id"], "")
+        if not f["agent"]:
+            noagent += 1
         if want and not any(w in norm(f["agent"]) or (norm(f["agent"]) and norm(f["agent"]) in w) for w in want):
             skipped += 1
             continue
@@ -373,9 +428,15 @@ async def sync_clients():
             db.execute("INSERT INTO clients(ext_id,name,phone,region,address,agent,search) VALUES(?,?,?,?,?,?,?)",
                        (f["ext"] or f["name"], f["name"], f["phone"], f["region"], f["address"], f["agent"], search))
             added += 1
+    purged = 0
+    if want and (added + upd) > 0:        # eski versiyada agentsiz/begona kirib qolgan mijozlarni tozalaymiz
+        purged = db.execute("DELETE FROM clients WHERE agent=''").rowcount
     db.commit()
     kv_set("cl_sync", str(now()))
-    return {"ok": True, "total": len(raw), "added": added, "updated": upd, "skipped_other_agents": skipped}
+    res = {"ok": True, "total": len(raw), "added": added, "updated": upd, "skipped_other_agents": skipped, "no_agent": noagent, "purged": purged}
+    if noagent or (skipped == len(raw)):        # agent aniqlanmadi — javob shaklini ko'rsatamiz (sozlash uchun)
+        res["sample"] = json.dumps(raw[0], ensure_ascii=False)[:700]
+    return res
 
 
 async def client_loop():
