@@ -201,7 +201,7 @@ const stockInfo = p => {                                   // {cls, text} yoki n
   return { cls: p.stock <= (p.unit === 'kg' ? 10 : 5) ? 'low' : 'ok', text: `📦 Skladda: ${fq(p.stock)} ${u}` };
 };
 const shortOf = (p, q) => p && p.stock != null && q > p.stock ? Math.max(0, +(q - p.stock).toFixed(3)) : 0;
-function render(html) { view.innerHTML = html; animateIn(view); scrollTo({ top: 0 }); }
+function render(html) { document.body.classList.remove('pick'); view.innerHTML = html; animateIn(view); scrollTo({ top: 0 }); setTimeout(() => dispatchEvent(new Event('resize')), 60); }
 let backFn = null;
 function setBack(fn) {
   backFn = fn; if (!tg) return;
@@ -358,6 +358,7 @@ async function pickProducts() {
     <input id="pq" placeholder="🔍 Mahsulot qidirish…" value="${esc(S.q)}" data-a>
     <div class="chips" id="cats" data-a>${cats.map(c => `<div class="chip ${c === S.cat ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}</div>`).join('')}</div>
     <div class="grid" id="grid"></div><div id="sent" style="height:1px"></div>`);
+  document.body.classList.add('pick'); setTimeout(() => dispatchEvent(new Event('resize')), 60);
   let shown = 0, list = [];
   const cardHtml = p => `
       <div class="prod ${S.cart[p.id] ? 'sel' : ''}" data-id="${p.id}">

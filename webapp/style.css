@@ -335,3 +335,17 @@ body.big .prod .nm{overflow-wrap:anywhere}
 body.big .prod .qty{width:100%}
 body.big .prod .qty input{min-width:0;flex:1 1 0}
 body.big .prod .unb,body.big .prod .add{width:100%;box-sizing:border-box}
+
+/* mahsulot tanlash oynasi: tepa qismi ixcham, ekranning asosiy joyi mahsulotlarga */
+body.pick header#top{position:relative;height:96px;border-radius:0 0 22px 22px}
+body.pick .banner-glass{padding:3px 9px;top:6px}
+body.pick .steps{margin:0 0 6px}
+body.pick .steps span{font-size:12px;padding:8px 2px 4px}
+body.pick .card{padding:8px 12px;margin-bottom:6px;font-size:14px}
+body.pick .card b{font-size:15px}
+body.pick #pq{padding:9px 12px;font-size:15px;margin-bottom:0}
+body.pick .chips{padding:6px 2px}
+body.pick .chip{padding:7px 13px;font-size:13.5px}
+body.big.pick #pq{padding:11px 14px;font-size:16px}
+body.big.pick .chip{padding:8px 14px;font-size:14.5px}
+body.big.pick .steps span{font-size:12.5px}
