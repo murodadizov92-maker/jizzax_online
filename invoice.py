@@ -1,6 +1,6 @@
 """Zakas uchun накладная (JPG) — guruhga zakas xabari bilan birga yuboriladi."""
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
@@ -14,6 +14,16 @@ def _f(sz, bold=False):
 
 def _money(v):
     return f"{int(round(v)):,}".replace(",", " ")
+
+
+def _dd(d):
+    try:
+        dt = datetime.strptime(d, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return "—"
+    today = (datetime.utcnow() + timedelta(hours=5)).date()
+    tag = {0: "сегодня", 1: "завтра", 2: "послезавтра"}.get((dt.date() - today).days, "")
+    return dt.strftime("%d.%m.%Y") + (f" ({tag})" if tag else "")
 
 
 def _qty(v):
@@ -61,6 +71,9 @@ def make_invoice(o: dict) -> bytes:
         d.text((x0, y), "Агент:", font=fb, fill="black")
         d.text((x0 + 140, y), str(o["region"]), font=fn, fill="black")
         y += 44
+    d.text((x0, y), "Доставка:", font=fb, fill="black")
+    d.text((x0 + 140, y), _dd(o.get("ddate")), font=_f(31, True), fill="#b00020")
+    y += 46
     d.text((x0, y), "Принял:", font=fb, fill="black")
     d.text((x0 + 140, y), str(o["user_name"]), font=fn, fill="black")
     y += 56

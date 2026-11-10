@@ -295,6 +295,7 @@ function detail(o) {
     <div class="card" data-a>${o.items.map(i => `<div class="row" style="margin:6px 0"><span>${esc(i.name)} × ${fq(i.qty)} ${i.unit || ''}${i.short ? ' ⚠️' : ''}</span><b>${money(i.price * i.qty)}</b></div>`).join('')}
       <hr style="border:0;border-top:1px solid var(--line)"><div class="row"><span>Jami</span><span class="sum"><span id="tot">0</span> so'm</span></div></div>
     ${o.items.some(i => i.short) ? `<div class="card shortcard" data-a><b>⚠️ Skladda yetmagan</b><table class="stbl"><tr><th>Mahsulot</th><th>So'ralgan</th><th>Skladda</th><th>Yetmaydi</th></tr>${o.items.filter(i => i.short).map(i => `<tr><td>${esc(i.name)}</td><td>${fq(i.qty)}</td><td>${fq(i.stock || 0)}</td><td class="bad">${fq(i.short)}</td></tr>${i.note ? `<tr class="nt"><td colspan="4">✍️ ${esc(i.note)}</td></tr>` : ''}`).join('')}</table></div>` : ''}
+    ${o.ddate ? `<div class="card" data-a>🚚 Yetkazish: <b>${o.ddate.split('-').reverse().join('.')}</b></div>` : ''}
     ${o.comment ? `<div class="card mut" data-a>💬 ${esc(o.comment)}</div>` : ''}
     ${S.me.admin ? `<div class="card" data-a><div class="mut" style="margin-bottom:8px">Holatni o'zgartirish (admin)</div>
       <div class="chips" style="flex-wrap:wrap">${keys.map(k => `<div class="chip ${k === o.status ? 'on' : ''}" data-s="${k}">${ST[k][0]}</div>`).join('')}</div>
@@ -439,11 +440,14 @@ function confirmView() {
         <div class="mut" style="margin:4px 0 8px">Zakas baribir yoziladi. Yetmasa nima qilish kerakligini izohda yozing (masalan: "boshqa turidan bering").</div>
         <table class="stbl"><tr><th>Mahsulot</th><th>So'ralgan</th><th>Skladda</th><th>Yetmaydi</th></tr>
         ${sr.map(r => `<tr><td>${esc(r.p.name)}</td><td>${fq(r.q)}</td><td>${fq(Math.max(0, r.p.stock))}</td><td class="bad">${fq(shortOf(r.p, r.q))}</td></tr><tr class="nt"><td colspan="4"><input data-n="${r.id}" placeholder="✍️ Izoh: yo'q bo'lsa nima qilamiz?" value="${esc(S.notes[r.id] || '')}"></td></tr>`).join('')}</table></div>` : ''; })()}
+      <div class="card" data-a><b>🚚 Yetkazish kuni</b><div class="chips" id="dd" style="margin-top:8px">${[['Bugun',0],['Ertaga',1],['Indinga',2]].map(([t, n]) => `<div class="chip ${n === 1 ? 'on' : ''}" data-dn="${n}">${t}</div>`).join('')}</div>
+        <input type="date" id="ddi" style="margin-top:8px"><div class="mut" id="ddt" style="margin-top:6px"></div></div>
       <textarea id="cm" rows="2" placeholder="💬 Izoh (ixtiyoriy)" data-a></textarea>
       <div class="row" style="margin:14px 0" data-a><span>Jami</span><span class="sum"><span id="tot">0</span> so'm</span></div>
       <button class="btn" id="send" data-a ${rows.length ? '' : 'disabled'}>✅ Zakasni yuborish</button>`);
     countTo($('#tot'), cartSum(), { dur: 700 });
     const chg = (id, v) => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; saveCart(); buzz(); draw(); };
+    initDD();
     $$('[data-n]').forEach(i => i.oninput = () => { S.notes[i.dataset.n] = i.value; });
     $$('[data-rm]').forEach(b => b.onclick = () => chg(b.dataset.rm, 0));
     $$('[data-m]').forEach(b => b.onclick = () => chg(b.dataset.m, S.cart[b.dataset.m] - stepOf(S.products.find(p => p.id === b.dataset.m))));
@@ -453,7 +457,7 @@ function confirmView() {
       $('#send').disabled = true;
       try {
         const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty, note: S.notes[id] || '' }));
-        const { order } = await api('/api/orders', { method: 'POST', json: { client_id: S.client.id, items, comment: $('#cm').value } });
+        const { order } = await api('/api/orders', { method: 'POST', json: { client_id: S.client.id, items, comment: $('#cm').value, ddate: window.__dd } });
         S.cart = {}; S.notes = {}; saveCart(); S.client = null; buzz('heavy'); confetti(); toast('Zakas yuborildi ✅');
         S.tab = 'mine'; detail(order); banner && banner.setProgress(ST.new[1]);
       } catch (e) { toast(e.message); $('#send').disabled = false; }
@@ -474,6 +478,16 @@ async function loadUsers() {
     box.querySelectorAll('select').forEach(s => s.onchange = async () => { try { await api('/api/users/' + s.dataset.u + '/access', { method: 'PUT', json: { agent: s.value } }); toast(s.value ? 'Ruxsat berildi' : 'Ruxsat olib tashlandi'); } catch (e) { toast(e.message); } });
   } catch (e) { box.textContent = e.message; }
 }
+function initDD() {
+  const box = document.getElementById('dd'); if (!box) return;
+  const iso = n => { const d = new Date(Date.now() + n * 864e5); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
+  const names = ['yakshanba', 'dushanba', 'seshanba', 'chorshanba', 'payshanba', 'juma', 'shanba'];
+  const set = (v, chip) => { window.__dd = v; box.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === chip)); const i = document.getElementById('ddi'); i.value = v; const d = new Date(v + 'T12:00'); document.getElementById('ddt').textContent = '📅 ' + v.split('-').reverse().join('.') + ' · ' + names[d.getDay()]; };
+  box.querySelectorAll('.chip').forEach(c => c.onclick = () => set(iso(+c.dataset.dn), c));
+  document.getElementById('ddi').min = iso(0);
+  document.getElementById('ddi').onchange = e => e.target.value && set(e.target.value, null);
+  set(iso(1), box.querySelector('[data-dn="1"]'));
+}
 function adminView() {
   clearTimer(); setBack(home); updateCartBar(false); setDock('admin');
   render(`
@@ -482,6 +496,7 @@ function adminView() {
       <div style="margin-top:10px;border-top:1px solid rgba(0,0,0,.08);padding-top:10px"><b style="font-size:14px">➕ ID bo'yicha qo'shish</b>
       <input id="nid" inputmode="numeric" placeholder="Telegram ID (masalan 7553654583)" style="margin-top:6px"><select id="nag" style="margin-top:6px;width:100%"></select>
       <button class="btn sec small" id="nadd" style="margin-top:8px">✅ Ruxsat berish</button></div></div>
+    <div class="card" data-a><b>💾 Ma'lumotlar zaxirasi</b><div class="mut" id="bk" style="margin-top:6px">...</div></div>
     <div class="card" data-a><b>Mijozlar bazasi</b><div class="mut">Hozir: ${S.me.clients} ta. Sales Doctor Excel: ИД клиента, Название клиента, Агент, Территория</div>
       <input type="file" id="xl" accept=".xlsx" style="margin-top:8px"><button class="btn sec small" id="up" style="margin-top:8px">📥 Excel yuklash</button></div>
     <div class="card" data-a><b>Mijoz qo'shish</b>
@@ -493,6 +508,7 @@ function adminView() {
       <div class="mut" id="stdbg" style="margin-top:8px;white-space:pre-wrap;word-break:break-all;font-size:11px"></div></div>
     <div class="card" data-a><b>Mahsulotlarni yangilash</b><div class="mut">Narx/rasm zakas bot'dan avtomatik olinadi (har ~45 soniyada).</div><button class="btn sec small" id="sync" style="margin-top:8px">🔄 Hozir yangilash</button></div>`);
   loadUsers();
+  api('/api/backup').then(b => { const e = $('#bk'); if (!e) return; e.innerHTML = !b.enabled ? '⚠️ DATABASE_URL yo\'q — zaxira ishlamayapti, deploydan keyin ma\'lumot yo\'qoladi' : b.ok === false ? '❌ Xato: ' + esc(b.error) : b.ok ? '✅ Saqlanmoqda (' + Math.round(b.size / 1024) + ' KB)' + (b.boot === 'restored' ? ' · oxirgi deployda tiklandi' : '') : '⏳ Birinchi nusxa kutilmoqda'; }).catch(() => {});
   $('#up').onclick = async () => {
     const f = $('#xl').files[0]; if (!f) return toast('Fayl tanlang');
     const fd = new FormData(); fd.append('file', f);

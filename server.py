@@ -14,6 +14,7 @@ import os
 import re
 import sqlite3
 import time
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import parse_qsl, urljoin
@@ -53,6 +54,8 @@ STATUS_TEXT = {
 
 # ---------------------------------------------------------------- DB
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+import persist
+PERSIST = persist.restore(DATABASE_URL, DB_PATH)   # deploydan keyin baza bo'sh bo'lsa — Postgres nusxasidan tiklanadi
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
 db.executescript(
@@ -75,6 +78,10 @@ CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS access(tg_id INTEGER PRIMARY KEY, agent TEXT NOT NULL, added INTEGER);
 """
 )
+try:
+    db.execute("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''")
+except sqlite3.OperationalError:
+    pass
 db.commit()
 
 
@@ -563,6 +570,17 @@ def topic_params():
     return p
 
 
+def fmt_ddate(d) -> str:
+    try:
+        dt = datetime.strptime(d, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return "—"
+    today = (datetime.utcnow() + timedelta(hours=5)).date()
+    diff = (dt.date() - today).days
+    tag = {0: "bugun", 1: "ertaga", 2: "indinga"}.get(diff, "")
+    return dt.strftime("%d.%m.%Y") + (f" ({tag})" if tag else "")
+
+
 def money(v) -> str:
     return f"{int(round(v)):,}".replace(",", " ")
 
@@ -571,7 +589,7 @@ async def notify_order(o: dict):
     if not CHAT_ID:
         return
     lines = [f"🆕 <b>Zakas #{o['id']}</b>", f"👤 {o['client_name']}" + (f" ({o['region']})" if o["region"] else ""),
-             f"🧑‍💼 {o['user_name']}", ""]
+             f"🧑‍💼 {o['user_name']}", f"🚚 <b>Yetkazish: {fmt_ddate(o.get('ddate'))}</b>", ""]
     for it in o["items"]:
         lines.append(f"• {it['name']} × {it['qty']:g} {it.get('unit', '')} = {money(it['price'] * it['qty'])}" + (" ⚠️" if it.get("short") else ""))
     lines += ["", f"💰 <b>Jami: {money(o['total'])} so'm</b>"]
@@ -675,6 +693,11 @@ async def h_me_put(request):
 async def h_products(request):
     items = await get_products(force=request.query.get("force") == "1" and request["admin"])
     return web.json_response({"items": annotate(items), "t": _cache["t"], "stock_t": _stock["t"]})
+
+
+async def h_backup(request):
+    need_admin(request)
+    return web.json_response({"enabled": bool(DATABASE_URL), "boot": PERSIST, **persist.status()})
 
 
 async def h_users(request):
@@ -869,11 +892,16 @@ async def h_order_create(request):
     if not items:
         return web.json_response({"error": "Savat bo'sh"}, status=400)
     comment = str(b.get("comment", ""))[:300]
+    ddate = str(b.get("ddate", ""))[:10]
+    try:
+        datetime.strptime(ddate, "%Y-%m-%d")
+    except ValueError:
+        ddate = (datetime.utcnow() + timedelta(hours=5, days=1)).strftime("%Y-%m-%d")   # ko'rsatilmasa — ertaga
     cur = db.execute(
-        "INSERT INTO orders(tg_id,user_name,client_id,client_name,region,items,total,comment,created,updated) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO orders(tg_id,user_name,client_id,client_name,region,items,total,comment,created,updated,ddate) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         (request["uid"], request["uname"], client["id"], client["name"], client["region"],
-         json.dumps(items, ensure_ascii=False), total, comment, now(), now()),
+         json.dumps(items, ensure_ascii=False), total, comment, now(), now(), ddate),
     )
     db.commit()
     o = row_order(db.execute("SELECT * FROM orders WHERE id=?", (cur.lastrowid,)).fetchone())
@@ -922,7 +950,7 @@ async def nocache_mw(request: web.Request, handler):
 
 async def on_start(app):
     reindex_clients()
-    app["tasks"] = [asyncio.create_task(poll_bot()), asyncio.create_task(keepalive()), asyncio.create_task(stock_loop())]
+    app["tasks"] = [asyncio.create_task(poll_bot()), asyncio.create_task(keepalive()), asyncio.create_task(stock_loop()), asyncio.create_task(persist.loop(DATABASE_URL, db))]
     r = db.execute("SELECT COUNT(*) c, MAX(updated) t FROM stock").fetchone()
     if r["c"]:
         _stock.update(rows=r["c"], t=r["t"] or 0, src="saqlangan")
@@ -937,6 +965,7 @@ def make_app():
         web.put("/api/me", h_me_put),
         web.get("/api/products", h_products),
         web.put("/api/products/{id}/unit", h_unit),
+        web.get("/api/backup", h_backup),
         web.get("/api/users", h_users),
         web.put("/api/users/{id}/access", h_user_access),
         web.get("/api/stock/status", h_stock_status),
@@ -953,6 +982,10 @@ def make_app():
         web.static("/static", BASE / "webapp"),
     ])
     app.on_startup.append(on_start)
+
+    async def on_stop(app):                       # deploy/qayta ishga tushishda oxirgi holatni saqlab ketamiz
+        await persist.backup(DATABASE_URL, db, force=True)
+    app.on_shutdown.append(on_stop)
     return app
 
 
