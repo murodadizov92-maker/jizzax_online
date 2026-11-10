@@ -528,7 +528,9 @@ function adminView() {
     $('#hello').textContent = 'Salom, ' + S.me.name;
     if (!S.me.allowed) {
       $('#dock') && $('#dock').classList.add('hidden');
-      render(`<div class="card" data-a style="text-align:center"><div style="font-size:42px">🔒</div><b>Zakas bo'limi yopiq</b><div class="mut" style="margin-top:6px">Bu bo'lim faqat savdo agentlari uchun. Ruxsat olish uchun adminga ID raqamingizni yuboring:</div><div style="font-size:22px;font-weight:700;margin-top:8px">${S.me.id}</div></div>`);
+      $('#top') && ($('#top').style.display = 'none');
+      render(`<div style="text-align:center;padding:6px 0 90px"><video src="/static/promo.mp4" autoplay muted loop playsinline webkit-playsinline style="width:100%;max-width:420px;border-radius:26px;box-shadow:0 18px 44px rgba(90,40,10,.35);background:#f4a36e"></video>
+        <div class="card" style="margin-top:14px"><b>🔒 Zakas bo'limi faqat savdo agentlari uchun</b><div class="mut" style="margin-top:6px">Ruxsat olish uchun ID raqamingizni adminga yuboring:</div><div style="font-size:24px;font-weight:800;margin-top:6px">${S.me.id}</div></div></div>`);
       return;
     }
     api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
