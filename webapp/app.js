@@ -498,7 +498,8 @@ function adminView() {
       <button class="btn sec small" id="nadd" style="margin-top:8px">✅ Ruxsat berish</button></div></div>
     <div class="card" data-a><b>💾 Ma'lumotlar zaxirasi</b><div class="mut" id="bk" style="margin-top:6px">...</div></div>
     <div class="card" data-a><b>Mijozlar bazasi</b><div class="mut">Hozir: ${S.me.clients} ta. Sales Doctor Excel: ИД клиента, Название клиента, Агент, Территория</div>
-      <input type="file" id="xl" accept=".xlsx" style="margin-top:8px"><button class="btn sec small" id="up" style="margin-top:8px">📥 Excel yuklash</button></div>
+      <input type="file" id="xl" accept=".xlsx" style="margin-top:8px"><button class="btn sec small" id="up" style="margin-top:8px">📥 Excel yuklash</button>
+      <button class="btn small" id="clsd" style="margin-top:8px">🔄 Sales Doctor'dan yangilash</button><div class="mut" id="clsdt" style="margin-top:6px">Excel shart emas: ilova o'zi Sales Doctor'dan oladi va har 6 soatda yangilab turadi.</div></div>
     <div class="card" data-a><b>Mijoz qo'shish</b>
       <input id="n" placeholder="Nomi" style="margin-top:8px"><input id="ph" placeholder="Telefon" style="margin-top:6px"><input id="rg" placeholder="Hudud" style="margin-top:6px"><input id="ad" placeholder="Manzil" style="margin-top:6px">
       <button class="btn sec small" id="addc" style="margin-top:8px">➕ Qo'shish</button></div>
@@ -508,6 +509,7 @@ function adminView() {
       <div class="mut" id="stdbg" style="margin-top:8px;white-space:pre-wrap;word-break:break-all;font-size:11px"></div></div>
     <div class="card" data-a><b>Mahsulotlarni yangilash</b><div class="mut">Narx/rasm zakas bot'dan avtomatik olinadi (har ~45 soniyada).</div><button class="btn sec small" id="sync" style="margin-top:8px">🔄 Hozir yangilash</button></div>`);
   loadUsers();
+  { const b = $('#clsd'); if (b) b.onclick = async () => { b.disabled = true; $('#clsdt').textContent = '⏳ Olinmoqda...'; try { const r = await api('/api/clients/sync', { method: 'POST' }); $('#clsdt').textContent = r.ok ? `✅ Topildi ${r.total} · yangi ${r.added} · yangilandi ${r.updated}` + (r.skipped_other_agents ? ` · boshqa agent ${r.skipped_other_agents} (o'tkazib yuborildi)` : '') : '❌ ' + r.error; } catch (e) { $('#clsdt').textContent = '❌ ' + e.message; } b.disabled = false; }; }
   api('/api/backup').then(b => { const e = $('#bk'); if (!e) return; e.innerHTML = !b.enabled ? '⚠️ DATABASE_URL yo\'q — zaxira ishlamayapti, deploydan keyin ma\'lumot yo\'qoladi' : b.ok === false ? '❌ Xato: ' + esc(b.error) : b.ok ? '✅ Saqlanmoqda (' + Math.round(b.size / 1024) + ' KB)' + (b.boot === 'restored' ? ' · oxirgi deployda tiklandi' : '') : '⏳ Birinchi nusxa kutilmoqda'; }).catch(() => {});
   $('#up').onclick = async () => {
     const f = $('#xl').files[0]; if (!f) return toast('Fayl tanlang');

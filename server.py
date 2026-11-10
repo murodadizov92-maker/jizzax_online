@@ -43,6 +43,7 @@ SD_URL = (SD_DOMAIN if SD_DOMAIN.startswith("http") else f"https://{SD_DOMAIN}")
 SD_LOGIN = os.getenv("SD_LOGIN", "")
 SD_PASSWORD = os.getenv("SD_PASSWORD", "")
 SD_WAREHOUSE = os.getenv("SD_WAREHOUSE", "").strip()        # ixtiyoriy: faqat shu sklad nomi
+SD_AGENTS = [x.strip() for x in os.getenv("SD_AGENTS", "Хусанов Самандар,Жабборов Самариддин,Усмонов Ғолибжон").split(",") if x.strip()]  # mijozlari olinadigan agentlar
 SD_INTERVAL = int(os.getenv("SD_INTERVAL", "600"))          # soniya
 STATUSES = ["new", "collecting", "on_way", "delivered"]
 STATUS_TEXT = {
@@ -252,7 +253,7 @@ def parse_stock(node, wh="", out=None):
     return out
 
 
-async def sd_get_all(method: str, params=None):
+async def sd_get_all(method: str, params=None, parser=None):
     """GET usuli: sahifalab (limit/page) hammasini oladi. Token eskirsa qayta login qiladi."""
     rows, last = [], None
     for page in range(1, 40):
@@ -275,7 +276,7 @@ async def sd_get_all(method: str, params=None):
         last = (st, txt)
         if not data or not data.get("status"):
             raise RuntimeError(f"{method}: HTTP {st}: {(txt or '')[:300]}")
-        part = parse_stock((data or {}).get("result"))
+        part = (parser or parse_stock)((data or {}).get("result"))
         rows += part
         pg = data.get("pagination") or {}
         total_pages = pg.get("pages") or pg.get("pageCount") or pg.get("totalPages")
@@ -285,6 +286,119 @@ async def sd_get_all(method: str, params=None):
         elif len(part) < 1000:
             break
     return rows, last
+
+
+# ---------------------------------------------------------------- MIJOZLAR (Sales Doctor)
+def _first(d, keys):
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, "", [], {}):
+            return v
+    return ""
+
+
+def _agent_name(v):
+    if isinstance(v, dict):
+        v = _first(v, ("name", "fio", "NAME", "agentName", "title"))
+    elif isinstance(v, list):
+        v = _agent_name(v[0]) if v else ""
+    return str(v or "").split("(")[0].strip()
+
+
+def client_fields(d: dict) -> dict:
+    name = _first(d, ("name", "CS_name", "clientName", "client_name", "title", "NAME"))
+    return {
+        "ext": str(_first(d, ("CS_id", "client_id", "clientId", "SD_id", "id", "code", "ID")) or ""),
+        "name": str(name or "").strip(),
+        "agent": _agent_name(_first(d, ("agent", "agents", "agentName", "agent_name", "AGENT", "agent_id_name"))),
+        "region": str(_agent_name(_first(d, ("territory", "region", "city", "TERRITORY"))) or ""),
+        "phone": str(_first(d, ("phone", "tel", "phoneNumber", "mobile", "PHONE")) or ""),
+        "address": str(_first(d, ("address", "ADDRESS", "adress")) or ""),
+    }
+
+
+def parse_clients(node, out=None):
+    out = [] if out is None else out
+    if isinstance(node, list):
+        for v in node:
+            if isinstance(v, dict) and client_fields(v)["name"] and ("agent" in v or "CS_id" in v or "id" in v or "client_id" in v or "clientId" in v):
+                out.append(v)
+            else:
+                parse_clients(v, out)
+    elif isinstance(node, dict):
+        for v in node.values():
+            parse_clients(v, out)
+    return out
+
+
+async def sync_clients():
+    """Sales Doctor'dan mijozlarni oladi (SD_AGENTS ro'yxatidagi agentlarniki): yangilaydi yoki qo'shadi. Excel shart emas."""
+    if not (SD_LOGIN and SD_PASSWORD):
+        return {"ok": False, "error": "SD_LOGIN / SD_PASSWORD kiritilmagan"}
+    if now() < _sd["block"]:
+        return {"ok": False, "error": f"Sales Doctor limiti: {max(1, (_sd['block'] - now()) // 60)} daqiqadan keyin urinib ko'ring"}
+    try:
+        raw, last = await sd_get_all("getClient", parser=parse_clients)
+    except Exception as e:
+        _sd["auth"] = None
+        return {"ok": False, "error": str(e)[:300]}
+    if not raw:
+        return {"ok": False, "error": "getClient javobida mijoz topilmadi", "sample": (last[1] or "")[:600] if last else ""}
+    known = {r["agent"] for r in db.execute("SELECT DISTINCT agent FROM clients WHERE agent!=''").fetchall()}
+    want = [norm(a) for a in SD_AGENTS]
+    if want:
+        known = None          # SD_AGENTS berilgan — shu agentlar bo'yicha filtr (kirill/lotin, Ғ/Г farqsiz)
+    added = upd = skipped = 0
+    for d in raw:
+        f = client_fields(d)
+        if not f["name"]:
+            continue
+        if want and not any(w in norm(f["agent"]) or (norm(f["agent"]) and norm(f["agent"]) in w) for w in want):
+            skipped += 1
+            continue
+        if known and f["agent"] not in known:
+            skipped += 1
+            continue
+        row = None
+        if f["ext"]:
+            row = db.execute("SELECT id FROM clients WHERE ext_id=?", (f["ext"],)).fetchone()
+        if not row:
+            row = db.execute("SELECT id FROM clients WHERE name=? AND agent=?", (f["name"], f["agent"])).fetchone()
+        search = norm(f"{f['name']} {f['phone']} {f['region']} {f['address']} {f['agent']}")
+        if row:
+            db.execute("UPDATE clients SET ext_id=?,name=?,phone=?,region=?,address=?,agent=?,search=? WHERE id=?",
+                       (f["ext"] or f["name"], f["name"], f["phone"], f["region"], f["address"], f["agent"], search, row["id"]))
+            upd += 1
+        else:
+            db.execute("INSERT INTO clients(ext_id,name,phone,region,address,agent,search) VALUES(?,?,?,?,?,?,?)",
+                       (f["ext"] or f["name"], f["name"], f["phone"], f["region"], f["address"], f["agent"], search))
+            added += 1
+    db.commit()
+    kv_set("cl_sync", str(now()))
+    return {"ok": True, "total": len(raw), "added": added, "updated": upd, "skipped_other_agents": skipped}
+
+
+async def client_loop():
+    """Qo'lda bir marta muvaffaqiyatli olingandan keyin har 6 soatda o'zi yangilaydi."""
+    if not (SD_LOGIN and SD_PASSWORD):
+        return
+    await asyncio.sleep(90)
+    while True:
+        wait = 6 * 3600
+        try:
+            r = await sync_clients()
+            log.info("client sync: %s", {k: v for k, v in r.items() if k != "sample"})
+            if not r.get("ok"):
+                wait = 1800
+        except Exception as e:
+            log.warning("client sync failed: %s", e)
+            wait = 1800
+        await asyncio.sleep(wait)
+
+
+async def h_clients_sync(request):
+    need_admin(request)
+    return web.json_response(await sync_clients())
 
 
 async def sync_stock(debug=False):
@@ -950,7 +1064,7 @@ async def nocache_mw(request: web.Request, handler):
 
 async def on_start(app):
     reindex_clients()
-    app["tasks"] = [asyncio.create_task(poll_bot()), asyncio.create_task(keepalive()), asyncio.create_task(stock_loop()), asyncio.create_task(persist.loop(DATABASE_URL, db))]
+    app["tasks"] = [asyncio.create_task(poll_bot()), asyncio.create_task(keepalive()), asyncio.create_task(stock_loop()), asyncio.create_task(persist.loop(DATABASE_URL, db)), asyncio.create_task(client_loop())]
     r = db.execute("SELECT COUNT(*) c, MAX(updated) t FROM stock").fetchone()
     if r["c"]:
         _stock.update(rows=r["c"], t=r["t"] or 0, src="saqlangan")
@@ -974,6 +1088,7 @@ def make_app():
         web.get("/api/regions", h_regions),
         web.get("/api/clients", h_clients),
         web.post("/api/clients/import", h_clients_import),
+        web.post("/api/clients/sync", h_clients_sync),
         web.post("/api/clients", h_client_add),
         web.get("/api/orders", h_orders),
         web.post("/api/orders", h_order_create),
