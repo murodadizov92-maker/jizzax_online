@@ -779,6 +779,8 @@ async def notify_order(o: dict):
     await tg("sendMessage", text="\n".join(lines), parse_mode="HTML", **topic_params())
     try:                                           # накладная (JPG) — xuddi chop etiladigan ko'rinishda
         from invoice import make_invoice
+        cl = db.execute("SELECT agent, phone, address FROM clients WHERE id=?", (o.get("client_id"),)).fetchone()
+        o = {**o, "agent": (cl["agent"] if cl else "") or "", "phone": (cl["phone"] if cl else "") or "", "address": (cl["address"] if cl else "") or ""}
         jpg = await asyncio.get_running_loop().run_in_executor(None, make_invoice, o)
         form = aiohttp.FormData()
         for k, v in topic_params().items():
