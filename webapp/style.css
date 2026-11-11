@@ -351,7 +351,6 @@ body.big.pick .chip{padding:8px 14px;font-size:14.5px}
 body.big.pick .steps span{font-size:12.5px}
 
 /* birlik (dona/kg) — rangli belgi, almashganda kartochka va belgi yonib o'chadi */
-#aa{display:none!important}
 .pr-u{display:inline-block;padding:2px 12px;border-radius:999px;font-weight:900;font-size:.82em;letter-spacing:.5px;vertical-align:baseline;transition:background .25s,color .25s}
 .pr-u.u-dona{background:#fff1e2;color:#c4430f;box-shadow:inset 0 0 0 2px #f0a266}
 .pr-u.u-kg{background:#dff5e3;color:#14702e;box-shadow:inset 0 0 0 2px #5fc27a}
@@ -359,3 +358,9 @@ body.big.pick .steps span{font-size:12.5px}
 .prod.chg .pr-u{animation:chgPop .9s cubic-bezier(.3,1.6,.5,1)}
 @keyframes chgCard{0%{box-shadow:0 0 0 0 rgba(238,122,47,.0)}25%{box-shadow:0 0 0 10px rgba(238,122,47,.45)}100%{box-shadow:0 0 0 0 rgba(238,122,47,0)}}
 @keyframes chgPop{0%{transform:scale(.6);filter:brightness(1.4)}50%{transform:scale(1.35)}100%{transform:scale(1)}}
+
+/* dona ⇄ kg: pastdagi kichik xabar (shablonga tegmaydi) */
+#uh{position:fixed;left:50%;bottom:calc(112px + env(safe-area-inset-bottom));transform:translate(-50%,16px);z-index:9999;padding:9px 20px;border-radius:999px;font-weight:900;font-size:17px;color:#fff;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;box-shadow:0 8px 22px rgba(0,0,0,.3);white-space:nowrap}
+#uh.on{opacity:1;transform:translate(-50%,0)}
+#uh.dn{background:#d9531a}
+#uh.kg{background:#1e8c3f}

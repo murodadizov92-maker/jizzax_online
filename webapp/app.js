@@ -195,6 +195,12 @@ const saveCart = () => { try { localStorage.setItem('cart', JSON.stringify(S.car
 const view = $('#view');
 const stepOf = p => p && p.unit === 'kg' ? .5 : 1;
 const fq = v => (+v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+let _uh;
+function unitHint(t, kg) {                                  // kichik qisqa yozuv: ekran pastida, hamma narsa ustida
+  let e = document.getElementById('uh'); if (!e) { e = document.createElement('div'); e.id = 'uh'; document.body.appendChild(e); }
+  e.textContent = (kg ? '⚖️ ' : '🔢 ') + t; e.className = kg ? 'kg' : 'dn'; void e.offsetWidth; e.classList.add('on');
+  clearTimeout(_uh); _uh = setTimeout(() => e.classList.remove('on'), 1300);
+}
 const stockInfo = p => {                                   // {cls, text} yoki null (qoldiq noma'lum bo'lsa)
   if (p.stock == null) return null; const u = p.stock_unit || (p.unit === 'kg' ? 'kg' : 'dona');
   if (p.stock <= 0) return { cls: 'out', text: '❌ Skladda yo\'q' };
@@ -377,7 +383,7 @@ async function pickProducts() {
     const set = v => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); const sh = shortOf(p, v); warn.classList.toggle('on', !!sh); warn.textContent = `⚠️ Yetmaydi: ${fq(sh)} · zakas baribir yoziladi`; saveCart(); updateCartBar(true); buzz(); };
     $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d * stepOf(p)));
     const ub = $('.unb', card);
-    const paintUnit = flash => { const k = p.unit === 'kg'; if (ub) ub.textContent = `🔄 ${k ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}`; const pu = $('.pr-u', card); pu.textContent = k ? '⚖️ KG' : '🔢 DONA'; pu.className = 'pr-u ' + (k ? 'u-kg' : 'u-dona'); $('.qty .un', card).textContent = k ? 'kg' : 'dona'; if (flash) { card.classList.remove('chg'); void card.offsetWidth; card.classList.add('chg'); toast(`${k ? '⚖️ Endi KG bilan' : '🔢 Endi DONA bilan'}: ${p.name}`); } };
+    const paintUnit = flash => { const k = p.unit === 'kg'; if (ub) ub.textContent = `🔄 ${k ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}`; const pu = $('.pr-u', card); pu.textContent = k ? '⚖️ KG' : '🔢 DONA'; pu.className = 'pr-u ' + (k ? 'u-kg' : 'u-dona'); $('.qty .un', card).textContent = k ? 'kg' : 'dona'; if (flash) { card.classList.remove('chg'); void card.offsetWidth; card.classList.add('chg'); unitHint(k ? 'dona → kg' : 'kg → dona', k); } };
     if (ub) ub.onclick = async e => {                      // kartochka qayta chizilmaydi (animatsiyasiz) — faqat yozuv almashadi
       e.stopPropagation(); const old = [p.unit, p.unit_set], nu = p.unit === 'kg' ? 'dona' : 'kg';
       p.unit = nu; p.unit_set = true; paintUnit(true); buzz();
@@ -533,7 +539,13 @@ function adminView() {
 }
 
 /* ================================================================== katta yozuv (kattalar uchun) */
-(function () { document.body.classList.add('big'); })();
+(function () {
+  let big = '1'; try { big = localStorage.getItem('big') || '1'; } catch (e) {}
+  const apply = () => { document.body.classList.toggle('big', big === '1'); const b = $('#aa'); if (b) b.textContent = big === '1' ? 'Aa −' : 'Aa +'; };
+  const btn = document.createElement('button'); btn.id = 'aa'; btn.setAttribute('aria-label', 'Yozuv o\'lchami'); $('#top').appendChild(btn);
+  btn.onclick = e => { e.stopPropagation(); big = big === '1' ? '0' : '1'; try { localStorage.setItem('big', big); } catch (er) {} apply(); buzz(); };
+  apply();
+})();
 
 /* ================================================================== start */
 (async () => {
