@@ -364,7 +364,7 @@ async function pickProducts() {
   const cardHtml = p => `
       <div class="prod ${S.cart[p.id] ? 'sel' : ''}" data-id="${p.id}">
         <div class="im ${p.image ? 'has' : ''}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('ok')" onerror="this.remove()">` : '🥩'}<span class="tag">${esc(p.category)}</span>${p.image ? '<span class="play">▶ Reklama</span>' : ''}</div>
-        <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm / <span class="pr-u">${p.unit === 'kg' ? 'kg' : 'dona'}</span></div>
+        <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm / <span class="pr-u ${p.unit === 'kg' ? 'u-kg' : 'u-dona'}">${p.unit === 'kg' ? '⚖️ KG' : '🔢 DONA'}</span></div>
           ${(() => { const s = stockInfo(p); return s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''; })()}
           <div class="qty"><button data-d="-1">−</button><input type="number" inputmode="decimal" min="0" step="any" value="${S.cart[p.id] || ''}" placeholder="0"><button data-d="1">+</button><i class="un">${p.unit === 'kg' ? 'kg' : 'dona'}</i></div>
           ${S.me && S.me.admin ? `<button class="unb">🔄 ${p.unit === 'kg' ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}</button>` : ''}
@@ -377,10 +377,10 @@ async function pickProducts() {
     const set = v => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); const sh = shortOf(p, v); warn.classList.toggle('on', !!sh); warn.textContent = `⚠️ Yetmaydi: ${fq(sh)} · zakas baribir yoziladi`; saveCart(); updateCartBar(true); buzz(); };
     $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d * stepOf(p)));
     const ub = $('.unb', card);
-    const paintUnit = () => { const k = p.unit === 'kg'; if (ub) ub.textContent = `🔄 ${k ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}`; $('.pr-u', card).textContent = k ? 'kg' : 'dona'; $('.qty .un', card).textContent = k ? 'kg' : 'dona'; };
+    const paintUnit = flash => { const k = p.unit === 'kg'; if (ub) ub.textContent = `🔄 ${k ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}`; const pu = $('.pr-u', card); pu.textContent = k ? '⚖️ KG' : '🔢 DONA'; pu.className = 'pr-u ' + (k ? 'u-kg' : 'u-dona'); $('.qty .un', card).textContent = k ? 'kg' : 'dona'; if (flash) { card.classList.remove('chg'); void card.offsetWidth; card.classList.add('chg'); toast(`${k ? '⚖️ Endi KG bilan' : '🔢 Endi DONA bilan'}: ${p.name}`); } };
     if (ub) ub.onclick = async e => {                      // kartochka qayta chizilmaydi (animatsiyasiz) — faqat yozuv almashadi
       e.stopPropagation(); const old = [p.unit, p.unit_set], nu = p.unit === 'kg' ? 'dona' : 'kg';
-      p.unit = nu; p.unit_set = true; paintUnit(); buzz();
+      p.unit = nu; p.unit_set = true; paintUnit(true); buzz();
       try { await api(`/api/products/${p.id}/unit`, { method: 'PUT', json: { unit: nu } }); } catch (er) { [p.unit, p.unit_set] = old; paintUnit(); toast(er.message); }
     };
     inp.onchange = () => set(inp.value);
@@ -405,6 +405,8 @@ async function pickProducts() {
   const draw = () => {
     const q = S.q.toLowerCase();
     list = S.products.filter(p => (S.cat === 'Hammasi' || p.category === S.cat) && (!q || p.name.toLowerCase().includes(q)));
+    const rank = p => p.stock != null && p.stock > 0 ? 0 : p.stock == null ? 1 : 2;     // avval skladda borlar, keyin qoldig'i noma'lum, oxirida yo'qlar
+    list = list.map((p, i) => [p, i]).sort((x, y) => rank(x[0]) - rank(y[0]) || x[1] - y[1]).map(x => x[0]);
     shown = 0; $('#grid').innerHTML = '';
     if (!list.length) { $('#grid').innerHTML = '<div class="mut" style="grid-column:1/-1;text-align:center;padding:24px">Hech narsa topilmadi</div>'; return; }
     more();
@@ -531,13 +533,7 @@ function adminView() {
 }
 
 /* ================================================================== katta yozuv (kattalar uchun) */
-(function () {
-  let big = '1'; try { big = localStorage.getItem('big') || '1'; } catch (e) {}
-  const apply = () => { document.body.classList.toggle('big', big === '1'); const b = $('#aa'); if (b) b.textContent = big === '1' ? 'Aa −' : 'Aa +'; };
-  const btn = document.createElement('button'); btn.id = 'aa'; btn.setAttribute('aria-label', 'Yozuv o\'lchami'); $('#top').appendChild(btn);
-  btn.onclick = e => { e.stopPropagation(); big = big === '1' ? '0' : '1'; try { localStorage.setItem('big', big); } catch (er) {} apply(); buzz(); };
-  apply();
-})();
+(function () { document.body.classList.add('big'); })();
 
 /* ================================================================== start */
 (async () => {
