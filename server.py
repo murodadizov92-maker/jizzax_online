@@ -776,7 +776,7 @@ async def notify_order(o: dict):
             lines.append(f"• {i['name']}: so'ralgan {i['qty']:g}, skladda {have:g} (yetmaydi {i['short']:g})" + (f"\n   ✍️ {i['note']}" if i.get("note") else ""))
     if o.get("comment"):
         lines.append(f"💬 {o['comment']}")
-    await tg("sendMessage", text="\n".join(lines), parse_mode="HTML", **topic_params())
+    sent = False                                   # guruhga faqat накладная rasmi; rasm chiqmasa — zaxira sifatida matn
     try:                                           # накладная (JPG) — xuddi chop etiladigan ko'rinishda
         from invoice import make_invoice
         cl = db.execute("SELECT agent, phone, address FROM clients WHERE id=?", (o.get("client_id"),)).fetchone()
@@ -792,8 +792,12 @@ async def notify_order(o: dict):
                 res = await r.json()
                 if not res.get("ok"):
                     log.warning("sendPhoto: %s", res)
+                else:
+                    sent = True
     except Exception as e:
         log.warning("nakladnoy failed: %s", e)
+    if not sent:
+        await tg("sendMessage", text="\n".join(lines), parse_mode="HTML", **topic_params())
 
 
 async def poll_bot():
