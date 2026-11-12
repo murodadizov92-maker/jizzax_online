@@ -439,8 +439,9 @@ function confirmView() {
   const draw = () => {
     const rows = Object.entries(S.cart).map(([id, q]) => ({ p: S.products.find(p => p.id === id), id, q })).filter(r => r.p);
     render(`
-      <div class="steps" data-a><span>1. Mijoz</span><span>2. Mahsulot</span><span class="on">3. Tasdiq</span></div>
+      <div class="steps" data-a><span>1. Mijoz</span><span id="toPick" style="cursor:pointer">2. Mahsulot</span><span class="on">3. Tasdiq</span></div>
       <div class="card" data-a><b>${esc(S.client.name)}</b><div class="mut">${S.client.agent ? '🧑‍💼 ' + esc(S.client.agent) : ''} ${esc(S.client.region)}</div></div>
+      <button class="btn addmore" id="addMore" data-a>➕ Yana mahsulot qo'shish</button>
       ${rows.map(r => { const s = stockInfo(r.p), sh = shortOf(r.p, r.q); return `<div class="card" data-a><div class="row"><b>${esc(r.p.name)}</b><button class="back" data-rm="${r.id}">✕</button></div>
         ${s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''}
         <div class="row"><span class="mut">${money(r.p.price)} × </span><div class="qty" style="flex:1;max-width:240px;margin:0 8px"><button data-m="${r.id}">−</button><input type="number" step="any" inputmode="decimal" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button><i class="un">${r.p.unit === 'kg' ? 'kg' : 'dona'}</i></div><b>${money(r.p.price * r.q)}</b></div></div>`; }).join('') || '<div class="mut" data-a>Savat bo\'sh</div>'}
@@ -455,7 +456,7 @@ function confirmView() {
       <button class="btn" id="send" data-a ${rows.length ? '' : 'disabled'}>✅ Zakasni yuborish</button>`);
     countTo($('#tot'), cartSum(), { dur: 700 });
     const chg = (id, v) => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; saveCart(); buzz(); draw(); };
-    initDD();
+    initDD(); $('#addMore').onclick = () => { buzz(); pickProducts(); }; $('#toPick').onclick = () => pickProducts();
     $$('[data-n]').forEach(i => i.oninput = () => { S.notes[i.dataset.n] = i.value; });
     $$('[data-rm]').forEach(b => b.onclick = () => chg(b.dataset.rm, 0));
     $$('[data-m]').forEach(b => b.onclick = () => chg(b.dataset.m, S.cart[b.dataset.m] - stepOf(S.products.find(p => p.id === b.dataset.m))));

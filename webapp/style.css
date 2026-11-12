@@ -361,3 +361,6 @@ body.big.pick .steps span{font-size:12.5px}
 #uh.on{opacity:1;transform:translate(-50%,0)}
 #uh.dn{background:#d9531a}
 #uh.kg{background:#1e8c3f}
+
+/* tasdiq oynasidan mahsulot tanlashga qaytish */
+.btn.addmore{width:100%;margin:0 0 10px;padding:14px;font-size:17px;font-weight:800;background:#fff;color:#c4430f;border:2px dashed #ee7a2f;border-radius:18px;box-shadow:none}
