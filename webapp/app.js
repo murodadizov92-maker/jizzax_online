@@ -323,7 +323,17 @@ async function newOrder() {
   render(`
     <div class="steps" data-a><span class="on">1. Mijoz</span><span>2. Mahsulot</span><span>3. Tasdiq</span></div>
     <input id="q" placeholder="🔍 Mijoz nomini yozing…" autocomplete="off" data-a>
-    <div class="chips" id="regs" data-a></div><div id="res"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>`);
+    <div class="chips" id="regs" data-a></div>
+    <button class="btn addmore" id="ncBtn" data-a>➕ Yangi mijoz qo'shish</button>
+    <div class="card ncform" id="ncForm" style="display:none"><b>➕ Yangi mijoz</b>
+      <input id="ncN" placeholder="Mijoz nomi (do'kon) *" autocomplete="off" style="margin-top:8px">
+      <input id="ncP" placeholder="Telefon" inputmode="tel" autocomplete="off" style="margin-top:6px">
+      <input id="ncR" placeholder="Territoriya (masalan: Paxtakor)" autocomplete="off" style="margin-top:6px">
+      <input id="ncA" placeholder="Manzil / mo'ljal" autocomplete="off" style="margin-top:6px">
+      ${S.me.admin ? `<select id="ncG" style="margin-top:6px;width:100%"><option value="">Agentni tanlang *</option>${agents.map(r => `<option ${S.region === r.region ? 'selected' : ''}>${esc(r.region)}</option>`).join('')}</select>` : ''}
+      <button class="btn" id="ncSave" style="margin-top:10px;width:100%">✅ Qo'shish</button></div>
+    <div id="ncList"></div>
+    <div id="res"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>`);
   const drawRegs = () => {
     if (!S.me.admin) $('#regs').style.display = 'none';
     $('#regs').innerHTML = `<div class="chip ${S.region ? '' : 'on'}" data-r="">Hammasi</div>` + agents.map(r => `<div class="chip ${S.region === r.region ? 'on' : ''}" data-r="${esc(r.region)}">🧑‍💼 ${esc(r.region)} <span style="opacity:.7">${r.count}</span></div>`).join('');
@@ -348,7 +358,29 @@ async function newOrder() {
     } catch (e) { $('#res').innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
   };
   $('#q').oninput = () => { clearTimeout(tm); tm = setTimeout(search, 120); };
-  drawRegs(); search();
+  const pick = c => { buzz('medium'); S.client = c; pickProducts(); };
+  const loadNew = async () => {
+    try {
+      const { items } = await api('/api/clients/new');
+      $('#ncList').innerHTML = items.length ? `<div class="nchead">🆕 Yangi mijozlar</div>` + items.map(c => `<div class="client nc" data-nid="${c.id}"><b>${esc(c.name)} <span class="newtag">YANGI</span></b><div class="mut">${S.me.admin && c.agent ? '🧑‍💼 ' + esc(c.agent) + ' · ' : ''}${esc(c.region)} ${esc(c.phone)}</div></div>`).join('') : '';
+      $$('#ncList .client').forEach(el => el.onclick = () => pick(items.find(c => c.id == el.dataset.nid)));
+    } catch (e) {}
+  };
+  $('#ncBtn').onclick = () => { const f = $('#ncForm'), open = f.style.display === 'none'; f.style.display = open ? '' : 'none'; $('#ncBtn').textContent = open ? '✕ Yopish' : '➕ Yangi mijoz qo\'shish'; if (open) { $('#ncN').value = $('#ncN').value || $('#q').value; $('#ncN').focus(); } };
+  $('#ncSave').onclick = async () => {
+    const b = $('#ncSave'); if (b.disabled) return;
+    const json = { name: $('#ncN').value, phone: $('#ncP').value, region: $('#ncR').value, address: $('#ncA').value };
+    if (S.me.admin) json.agent = $('#ncG').value;
+    b.disabled = true;
+    try {
+      const { client } = await api('/api/clients', { method: 'POST', json });
+      toast('✅ Mijoz qo\'shildi'); buzz('medium');
+      ['#ncN', '#ncP', '#ncR', '#ncA'].forEach(s => $(s).value = ''); $('#ncForm').style.display = 'none'; $('#ncBtn').textContent = '➕ Yangi mijoz qo\'shish';
+      await loadNew(); search();
+    } catch (e) { toast(e.message); }
+    b.disabled = false;
+  };
+  drawRegs(); search(); loadNew();
 }
 
 /* ================================================================== 2) mahsulotlar */
@@ -509,9 +541,6 @@ function adminView() {
     <div class="card" data-a><b>Mijozlar bazasi</b><div class="mut">Hozir: ${S.me.clients} ta. Sales Doctor Excel: ИД клиента, Название клиента, Агент, Территория</div>
       <input type="file" id="xl" accept=".xlsx" style="margin-top:8px"><button class="btn sec small" id="up" style="margin-top:8px">📥 Excel yuklash</button>
       <button class="btn small" id="clsd" style="margin-top:8px">🔄 Sales Doctor'dan yangilash</button><div class="mut" id="clsdt" style="margin-top:6px">Excel shart emas: ilova o'zi Sales Doctor'dan oladi va har 6 soatda yangilab turadi.</div></div>
-    <div class="card" data-a><b>Mijoz qo'shish</b>
-      <input id="n" placeholder="Nomi" style="margin-top:8px"><input id="ph" placeholder="Telefon" style="margin-top:6px"><input id="rg" placeholder="Hudud" style="margin-top:6px"><input id="ad" placeholder="Manzil" style="margin-top:6px">
-      <button class="btn sec small" id="addc" style="margin-top:8px">➕ Qo'shish</button></div>
     <div class="card" data-a><b>📦 Sklad qoldig'i (ostatka)</b><div class="mut" id="stinfo">Yuklanmoqda…</div>
       <button class="btn sec small" id="stsd" style="margin-top:8px">🔄 Sales Doctor'dan olish</button>
       <div style="margin-top:8px"><input type="file" id="stx" accept=".xlsx"><button class="btn sec small" id="stup" style="margin-top:8px">📥 Excel'dan yuklash</button></div>
@@ -524,9 +553,6 @@ function adminView() {
     const f = $('#xl').files[0]; if (!f) return toast('Fayl tanlang');
     const fd = new FormData(); fd.append('file', f);
     try { const r = await api('/api/clients/import', { method: 'POST', body: fd }); toast(`${r.rows} ta mijoz yuklandi`); S.me = await api('/api/me'); adminView(); } catch (e) { toast(e.message); }
-  };
-  $('#addc').onclick = async () => {
-    try { await api('/api/clients', { method: 'POST', json: { name: $('#n').value, phone: $('#ph').value, region: $('#rg').value, address: $('#ad').value } }); toast('Qo\'shildi'); S.me = await api('/api/me'); adminView(); } catch (e) { toast(e.message); }
   };
   const stInfo = async () => {
     try { const s = await api('/api/stock/status');

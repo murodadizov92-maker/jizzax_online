@@ -27,6 +27,7 @@ log = logging.getLogger("online")
 
 BASE = Path(__file__).parent
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+JARVIS_KEY = os.getenv("JARVIS_KEY", "").strip()   # Jarvis (kompyuter) ilovasi uchun maxfiy kalit
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x}
 CHAT_ID = os.getenv("CHAT_ID", "")            # zakas guruhi ID (masalan -1001234567890)
 TOPIC_ID = os.getenv("TOPIC_ID", "")          # "Жиззах онлайн закас" topik ID
@@ -79,10 +80,14 @@ CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS access(tg_id INTEGER PRIMARY KEY, agent TEXT NOT NULL, added INTEGER);
 """
 )
-try:
-    db.execute("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''")
-except sqlite3.OperationalError:
-    pass
+for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
+             "ALTER TABLE clients ADD COLUMN added_by INTEGER DEFAULT 0",   # ilovada qo'lda qo'shilgan mijoz (kim qo'shgan)
+             "ALTER TABLE clients ADD COLUMN added_at INTEGER DEFAULT 0",
+             "ALTER TABLE orders ADD COLUMN printed_at INTEGER DEFAULT 0"):   # Jarvis'da chop etilgan vaqt
+    try:
+        db.execute(_sql)
+    except sqlite3.OperationalError:
+        pass
 db.commit()
 
 
@@ -881,6 +886,53 @@ async def h_backup(request):
     return web.json_response({"enabled": bool(DATABASE_URL), "boot": PERSIST, **persist.status()})
 
 
+# ---------------------------------------------------------------- JARVIS (kompyuterdagi ilova: zakaslarni chop etish)
+def _jarvis_ok(request):
+    import hmac
+    k = request.headers.get("X-Jarvis-Key") or request.query.get("key", "")
+    if not JARVIS_KEY or not hmac.compare_digest(k, JARVIS_KEY):
+        raise web.HTTPUnauthorized(text="JARVIS_KEY noto'g'ri yoki serverda o'rnatilmagan")
+
+
+def _order_full(row):
+    o = dict(row)
+    o["items"] = json.loads(o["items"] or "[]")
+    cl = db.execute("SELECT agent, phone, address FROM clients WHERE id=?", (o.get("client_id"),)).fetchone()
+    o.update(agent=(cl["agent"] if cl else "") or "", phone=(cl["phone"] if cl else "") or "", address=(cl["address"] if cl else "") or "")
+    return o
+
+
+async def h_jarvis_orders(request):
+    _jarvis_ok(request)
+    days = max(1, min(60, int(request.query.get("days", "7") or 7)))
+    rows = db.execute("SELECT * FROM orders WHERE created>? ORDER BY id DESC LIMIT 300", (now() - days * 86400,)).fetchall()
+    out = []
+    for r in rows:
+        o = _order_full(r)
+        out.append({k: o.get(k) for k in ("id", "client_name", "region", "agent", "user_name", "total", "ddate", "created", "printed_at", "comment")} | {"n": len(o["items"])})
+    return web.json_response({"items": out})
+
+
+async def h_jarvis_invoice(request):
+    _jarvis_ok(request)
+    row = db.execute("SELECT * FROM orders WHERE id=?", (int(request.match_info["id"]),)).fetchone()
+    if not row:
+        raise web.HTTPNotFound()
+    from invoice import make_invoice
+    jpg = await asyncio.get_running_loop().run_in_executor(None, make_invoice, _order_full(row))
+    return web.Response(body=jpg, content_type="image/jpeg")
+
+
+async def h_jarvis_printed(request):
+    _jarvis_ok(request)
+    b = await request.json()
+    ids = [int(x) for x in b.get("ids", [])][:300]
+    val = 0 if b.get("undo") else now()
+    db.executemany("UPDATE orders SET printed_at=? WHERE id=?", [(val, i) for i in ids])
+    db.commit()
+    return web.json_response({"ok": True, "n": len(ids)})
+
+
 async def h_users(request):
     need_admin(request)
     rows = db.execute("SELECT a.tg_id AS tg_id, COALESCE(u.name,'(hali kirmagan)') AS name, u.username AS username, u.last_seen AS last_seen, a.agent AS agent FROM access a LEFT JOIN users u ON u.tg_id=a.tg_id "
@@ -1024,18 +1076,34 @@ async def h_clients_import(request):
 
 
 async def h_client_add(request):
-    need_admin(request)
+    """Agent ham, admin ham yangi mijoz qo'sha oladi. Agent qo'shgan mijoz avtomatik o'sha agentga biriktiriladi."""
     b = await request.json()
-    name = str(b.get("name", "")).strip()
-    if not name:
-        return web.json_response({"error": "nom kerak"}, status=400)
-    phone, region, addr = (str(b.get(k, "")).strip() for k in ("phone", "region", "address"))
-    db.execute(
-        "INSERT OR REPLACE INTO clients(ext_id,name,phone,region,address,search) VALUES(?,?,?,?,?,?)",
-        (f"manual:{name}", name, phone, region, addr, norm(f"{name} {phone} {region} {addr}")),
+    name = str(b.get("name", "")).strip()[:120]
+    if len(name) < 2:
+        return web.json_response({"error": "Mijoz nomini yozing"}, status=400)
+    phone, region, addr = (str(b.get(k, "")).strip()[:120] for k in ("phone", "region", "address"))
+    agent = request["agent"] if not request["admin"] else (str(b.get("agent", "")).strip() or request["agent"])
+    if not agent:
+        return web.json_response({"error": "Agentni tanlang"}, status=400)
+    if db.execute("SELECT 1 FROM clients WHERE lower(name)=lower(?) AND agent=?", (name, agent)).fetchone():
+        return web.json_response({"error": "Bu mijoz bazada bor"}, status=400)
+    cur = db.execute(
+        "INSERT INTO clients(ext_id,name,phone,region,address,agent,search,added_by,added_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (f"manual:{agent}:{name}", name, phone, region, addr, agent, norm(f"{name} {phone} {region} {addr} {agent}"), request["uid"], now()),
     )
     db.commit()
-    return web.json_response({"ok": True})
+    row = db.execute("SELECT id,name,phone,region,address,agent,added_at FROM clients WHERE id=?", (cur.lastrowid,)).fetchone()
+    return web.json_response({"ok": True, "client": dict(row)})
+
+
+async def h_clients_new(request):
+    """Ilovada qo'shilgan yangi mijozlar (oxirgi 30 kun). Agent faqat o'zinikini ko'radi."""
+    sql, args = "SELECT id,name,phone,region,address,agent,added_at FROM clients WHERE added_by>0 AND added_at>?", [now() - 30 * 86400]
+    if not request["admin"]:
+        sql += " AND agent=?"
+        args.append(request["agent"])
+    rows = db.execute(sql + " ORDER BY added_at DESC LIMIT 50", args).fetchall()
+    return web.json_response({"items": [dict(r) for r in rows]})
 
 
 async def h_orders(request):
@@ -1147,6 +1215,9 @@ def make_app():
         web.get("/api/products", h_products),
         web.put("/api/products/{id}/unit", h_unit),
         web.get("/api/backup", h_backup),
+        web.get("/jarvis/orders", h_jarvis_orders),
+        web.get("/jarvis/invoice/{id}.jpg", h_jarvis_invoice),
+        web.post("/jarvis/printed", h_jarvis_printed),
         web.get("/api/users", h_users),
         web.put("/api/users/{id}/access", h_user_access),
         web.get("/api/stock/status", h_stock_status),
@@ -1157,6 +1228,7 @@ def make_app():
         web.post("/api/clients/import", h_clients_import),
         web.post("/api/clients/sync", h_clients_sync),
         web.post("/api/clients", h_client_add),
+        web.get("/api/clients/new", h_clients_new),
         web.get("/api/orders", h_orders),
         web.post("/api/orders", h_order_create),
         web.post("/api/orders/{id}/status", h_order_status),

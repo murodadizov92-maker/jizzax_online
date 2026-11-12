@@ -364,3 +364,9 @@ body.big.pick .steps span{font-size:12.5px}
 
 /* tasdiq oynasidan mahsulot tanlashga qaytish */
 .btn.addmore{width:100%;margin:0 0 10px;padding:14px;font-size:17px;font-weight:800;background:#fff;color:#c4430f;border:2px dashed #ee7a2f;border-radius:18px;box-shadow:none}
+
+/* yangi mijoz qo'shish (agentlar uchun) */
+.ncform{border:2px solid #ee7a2f}
+.nchead{font-weight:900;font-size:17px;margin:12px 4px 6px;color:#c4430f}
+.client.nc{border:2px solid #f0a266;background:#fff8f1}
+.newtag{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:#d9531a;color:#fff;font-size:12px;font-weight:900;vertical-align:middle}
