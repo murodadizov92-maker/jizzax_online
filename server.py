@@ -784,8 +784,8 @@ async def notify_order(o: dict):
     sent = False                                   # guruhga faqat накладная rasmi; rasm chiqmasa — zaxira sifatida matn
     try:                                           # накладная (JPG) — xuddi chop etiladigan ko'rinishda
         from invoice import make_invoice
-        cl = db.execute("SELECT agent, phone, address FROM clients WHERE id=?", (o.get("client_id"),)).fetchone()
-        o = {**o, "agent": (cl["agent"] if cl else "") or "", "phone": (cl["phone"] if cl else "") or "", "address": (cl["address"] if cl else "") or ""}
+        cl = db.execute("SELECT agent, phone, address, ext_id FROM clients WHERE id=?", (o.get("client_id"),)).fetchone()
+        o = {**o, "agent": (cl["agent"] if cl else "") or "", "phone": (cl["phone"] if cl else "") or "", "address": (cl["address"] if cl else "") or "", "ext_id": (cl["ext_id"] if cl else "") or ""}
         jpg = await asyncio.get_running_loop().run_in_executor(None, make_invoice, o)
         form = aiohttp.FormData()
         for k, v in topic_params().items():
@@ -897,8 +897,8 @@ def _jarvis_ok(request):
 def _order_full(row):
     o = dict(row)
     o["items"] = json.loads(o["items"] or "[]")
-    cl = db.execute("SELECT agent, phone, address FROM clients WHERE id=?", (o.get("client_id"),)).fetchone()
-    o.update(agent=(cl["agent"] if cl else "") or "", phone=(cl["phone"] if cl else "") or "", address=(cl["address"] if cl else "") or "")
+    cl = db.execute("SELECT agent, phone, address, ext_id FROM clients WHERE id=?", (o.get("client_id"),)).fetchone()
+    o.update(agent=(cl["agent"] if cl else "") or "", phone=(cl["phone"] if cl else "") or "", address=(cl["address"] if cl else "") or "", ext_id=(cl["ext_id"] if cl else "") or "")
     return o
 
 

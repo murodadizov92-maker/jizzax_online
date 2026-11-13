@@ -78,6 +78,15 @@ def make_invoice(o: dict) -> bytes:
     d.text((x0, y), "Клиент:", font=fb, fill="black")
     d.text((V, y), _clean(o["client_name"]), font=_f(31, True), fill="black")
     y += 48
+    cid = str(o.get("ext_id") or "")
+    if cid and not cid.startswith("manual:") and cid != _clean(o["client_name"]):   # Sales Doctor'dagi mijoz ID (ИД клиента)
+        d.text((x0, y), "ID клиента:", font=fb, fill="black")
+        d.text((V, y), _clean(cid), font=_f(31, True), fill="black")
+        y += 46
+    elif cid.startswith("manual:"):
+        d.text((x0, y), "ID клиента:", font=fb, fill="black")
+        d.text((V, y), "новый клиент (нет в базе)", font=fn, fill="#b00020")
+        y += 44
     if _clean(o.get("region")):
         d.text((x0, y), "Территория:", font=fb, fill="black")
         d.text((V, y), _clean(o["region"]), font=fn, fill="black")
