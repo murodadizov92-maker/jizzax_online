@@ -1,0 +1,20 @@
+ONLINE ZAKAS -> JARVIS (chop etish bo'limi)
+
+1) Render (jizzax-online servisi) -> Environment -> yangi o'zgaruvchi:
+      JARVIS_KEY = o'zingiz o'ylagan maxfiy so'z (masalan: mc-jizzax-2026-print)
+   Save -> servis qayta ishga tushadi.
+
+2) online_zakas_jarvis.py faylini D:\jarvis ichiga qo'ying.
+   Fayl boshidagi qatorga o'sha kalitni yozing:
+      KEY = os.getenv("JARVIS_KEY", "mc-jizzax-2026-print")
+
+3) Kompyuterda bir marta:   pip install pillow pywin32
+
+4) Ishga tushirish:   python online_zakas_jarvis.py
+   Telefonda ochish:  http://<kompyuter-IP>:8791   (Tailscale bo'lsa Tailscale IP)
+   Jarvis'ga plitka: shu manzilni ochadigan "ONLINE ZAKAS" tugmasi.
+   Yoki jarvis_app.py ichida:   import online_zakas_jarvis; online_zakas_jarvis.start(True)
+
+Ishlatish: "Chop etilmagan" ro'yxatidan zakaslarni belgilang (yoki "Hammasini tanlash")
+-> "Chop etish". Накладнаялар A4 ga ketma-ket (bir varaqqa 2 ta) taxlanib Canon MF3010 ga ketadi,
+zakaslarga "✓ chop etildi" belgisi qo'yiladi. PDF nusxa: D:\jarvis\online_zakas_print\
