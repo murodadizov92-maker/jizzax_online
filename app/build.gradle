@@ -1,0 +1,50 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'uz.meatcity.zakas'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'uz.meatcity.zakas'
+        minSdk 23
+        targetSdk 34
+        versionCode 5
+        versionName '1.4'
+        // Ilova ochadigan sayt manzili (Render)
+        buildConfigField 'String', 'APP_URL', '"https://jizzax-online.onrender.com/"'
+    }
+    buildFeatures { buildConfig true }
+    // Doimiy imzo: har yangi versiya eskisining ustiga o'rnatiladi (o'chirib qayta o'rnatish shart emas)
+    signingConfigs {
+        meatcity {
+            storeFile file('meatcity.jks')
+            storePassword 'meatcity2026'
+            keyAlias 'meatcity'
+            keyPassword 'meatcity2026'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.meatcity
+        }
+    }
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // kotlin-stdlib versiyalarini tenglashtiradi (Duplicate class xatosiga qarshi)
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.biometric:biometric:1.1.0'
+    implementation 'androidx.activity:activity:1.9.2'
+}
