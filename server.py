@@ -47,6 +47,7 @@ SD_PASSWORD = os.getenv("SD_PASSWORD", "")
 SD_WAREHOUSE = os.getenv("SD_WAREHOUSE", "").strip()        # ixtiyoriy: faqat shu sklad nomi
 SD_AGENTS = [x.strip() for x in os.getenv("SD_AGENTS", "Хусанов Самандар,Жабборов Самариддин,Усмонов Ғолибжон").split(",") if x.strip()]  # mijozlari olinadigan agentlar
 SD_INTERVAL = int(os.getenv("SD_INTERVAL", "600"))          # soniya
+ADMIN_ROLE = "@admin"                                       # access.agent: Jarvis'dan berilgan admin roli
 SKLAD = "@sklad"                                            # access.agent qiymati: skladchi roli (vozvrat kiritadi)
 STATUSES = ["new", "collecting", "on_way", "delivered"]
 STATUS_TEXT = {
@@ -641,9 +642,9 @@ async def auth_mw(request: web.Request, handler):
         )
         db.commit()
         request["uid"] = user["id"]
-        request["admin"] = user["id"] in ADMIN_IDS
         acc = db.execute("SELECT agent FROM access WHERE tg_id=?", (user["id"],)).fetchone()
-        request["agent"] = acc["agent"] if acc else ""
+        request["admin"] = user["id"] in ADMIN_IDS or bool(acc and acc["agent"] == ADMIN_ROLE)   # Jarvis'da "admin" roli berilgan xodim ham
+        request["agent"] = acc["agent"] if acc and acc["agent"] != ADMIN_ROLE else ""
         request["allowed"] = request["admin"] or bool(acc)
         request["role"] = "admin" if request["admin"] else ("sklad" if request["agent"] == SKLAD else ("agent" if acc else ""))
         if request["agent"] == SKLAD:              # skladchi: agent emas — mijoz bazasi va zakaslar unga yopiq
@@ -1936,6 +1937,92 @@ async def h_j_otk_resend(request):
     return web.json_response({"ok": not err, "error": err})
 
 
+# ---------------------------------------------------------------- XODIMLAR (login/parol Jarvis'dagi "Foydalanuvchilar" bo'limidan)
+ROLE_OF = {"agent": None, "sklad": SKLAD, "admin": ADMIN_ROLE}
+
+
+def _staff_row(login):
+    return db.execute("SELECT l.login, l.tg_id, u.name, u.username AS phone, u.last_seen, a.agent "
+                      "FROM app_logins l LEFT JOIN users u ON u.tg_id=l.tg_id LEFT JOIN access a ON a.tg_id=l.tg_id WHERE l.login=?", (login,)).fetchone()
+
+
+def _staff_out(r):
+    acc = r["agent"] or ""
+    role = "sklad" if acc == SKLAD else "admin" if acc == ADMIN_ROLE or r["tg_id"] in ADMIN_IDS else "agent" if acc else ""
+    return {"login": r["login"], "name": r["name"] or "", "phone": r["phone"] or "", "role": role,
+            "agent": acc if role == "agent" else "", "active": bool(acc) or r["tg_id"] in ADMIN_IDS,
+            "last_seen": r["last_seen"] or 0, "telegram": r["tg_id"] > 0}
+
+
+async def h_j_staff(request):
+    _jarvis_ok(request)
+    rows = db.execute("SELECT login FROM app_logins ORDER BY login").fetchall()
+    return web.json_response({"items": [_staff_out(_staff_row(r["login"])) for r in rows], "agents": ret_agents()})
+
+
+async def h_j_staff_save(request):
+    """Jarvis -> {login, password?, name, phone, role: agent|sklad|admin, agent, active}. Login bo'yicha yaratadi yoki yangilaydi."""
+    _jarvis_ok(request)
+    b = await request.json()
+    login = str(b.get("login", "")).strip().lower()
+    if not re.fullmatch(r"[\w.@-]{3,40}", login):
+        return web.json_response({"error": "Login: 3-40 belgi (harf, raqam, . - _ @)"}, status=400)
+    role = str(b.get("role", "agent")).strip().lower()
+    if role not in ROLE_OF:
+        return web.json_response({"error": "Rol: agent, sklad yoki admin"}, status=400)
+    agent = str(b.get("agent", "")).strip()
+    if role == "agent":
+        match = [a for a in ret_agents() if norm(a) == norm(agent)] or [a for a in ret_agents() if agent and translit(agent) in translit(a)]
+        if not match:
+            return web.json_response({"error": "Agent rolida SD agent tanlanishi kerak", "agents": ret_agents()}, status=400)
+        agent = match[0]
+    pw = str(b.get("password", ""))
+    ph = str(b.get("pw_hash", "")).strip().lower()          # Jarvis'dagi PBKDF2 xeshi (parol ochiq yuborilmaydi)
+    if ph and not re.fullmatch(r"[0-9a-f]{16,128}\$[0-9a-f]{64}", ph):
+        return web.json_response({"error": "Parol xeshi noto'g'ri"}, status=400)
+    old = db.execute("SELECT tg_id FROM app_logins WHERE login=?", (login,)).fetchone()
+    if not old and len(pw) < 4 and not ph:
+        return web.json_response({"error": "Yangi xodimga parol kerak (kamida 4 belgi)"}, status=400)
+    if pw and len(pw) < 4:
+        return web.json_response({"error": "Parol kamida 4 belgi"}, status=400)
+    if old:
+        uid = old["tg_id"]
+    else:                                         # Telegram'siz xodim: ichki (manfiy) ID
+        uid = min(-1000, (db.execute("SELECT MIN(tg_id) m FROM users").fetchone()["m"] or 0)) - 1
+        db.execute("INSERT INTO app_logins(login,pw,tg_id,created) VALUES(?,?,?,?)", (login, ph or pw_hash(pw), uid, now()))
+        pw, ph = "", ""
+    name = re.sub(r"\s+", " ", str(b.get("name", "")).strip())[:80] or login
+    db.execute("INSERT INTO users(tg_id,name,username,created,last_seen) VALUES(?,?,?,?,0) "
+               "ON CONFLICT(tg_id) DO UPDATE SET name=excluded.name" + (", username=excluded.username" if uid < 0 else ""),
+               (uid, name, str(b.get("phone", ""))[:30], now()))
+    newpw = ph or (pw_hash(pw) if pw else "")
+    oldpw = db.execute("SELECT pw FROM app_logins WHERE login=?", (login,)).fetchone()["pw"]
+    if newpw and newpw != oldpw:
+        db.execute("UPDATE app_logins SET pw=? WHERE login=?", (newpw, login))
+        db.execute("DELETE FROM app_tokens WHERE tg_id=?", (uid,))      # parol almashdi — eski kirishlar bekor
+    active = b.get("active", True) not in (False, 0, "0", "false")
+    if active:
+        db.execute("INSERT OR REPLACE INTO access(tg_id,agent,added) VALUES(?,?,?)", (uid, ROLE_OF[role] or agent, now()))
+    else:
+        db.execute("DELETE FROM access WHERE tg_id=?", (uid,))
+        db.execute("DELETE FROM app_tokens WHERE tg_id=?", (uid,))
+    db.commit()
+    return web.json_response({"ok": True, "staff": _staff_out(_staff_row(login)), "created": not old})
+
+
+async def h_j_staff_delete(request):
+    _jarvis_ok(request)
+    login = str((await request.json()).get("login", "")).strip().lower()
+    r = db.execute("SELECT tg_id FROM app_logins WHERE login=?", (login,)).fetchone()
+    if not r:
+        return web.json_response({"ok": True})
+    db.execute("DELETE FROM app_logins WHERE login=?", (login,))
+    db.execute("DELETE FROM app_tokens WHERE tg_id=?", (r["tg_id"],))
+    db.execute("DELETE FROM access WHERE tg_id=?", (r["tg_id"],))
+    db.commit()
+    return web.json_response({"ok": True})
+
+
 BOOT_V = str(int(time.time()))
 
 
@@ -2023,6 +2110,9 @@ def make_app():
         web.get("/jarvis/settings", h_j_settings),
         web.post("/jarvis/settings", h_j_settings),
         web.get("/jarvis/agents", h_j_agents),
+        web.get("/jarvis/staff", h_j_staff),
+        web.post("/jarvis/staff", h_j_staff_save),
+        web.post("/jarvis/staff/delete", h_j_staff_delete),
         web.post("/jarvis/agent_prices", h_j_agent_prices),
         web.get("/api/notes", h_notes),
         web.post("/app/login", h_app_login),
