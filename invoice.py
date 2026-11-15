@@ -63,7 +63,7 @@ def make_invoice(o: dict) -> bytes:
     for i, it in enumerate(items, 1):
         nm = _wrap(tmp, _clean(it["name"]), fn, cols[1][1] - 20)
         rows.append((i, it, nm, max(52, 14 + 34 * len(nm))))
-    H = 520 + sum(r[3] for r in rows) + 330
+    H = 620 + sum(r[3] for r in rows) + 330 + 40 * len(str(o.get("comment") or "")) // 40
     im = Image.new("RGB", (W, H), "white")
     d = ImageDraw.Draw(im)
     try:
@@ -71,7 +71,10 @@ def make_invoice(o: dict) -> bytes:
     except Exception:
         now = datetime.utcnow() + timedelta(hours=5)
     y = 50
-    d.text((x0, y), f"НАКЛАДНАЯ № {o['id']}", font=_f(46, True), fill="black")
+    ret = o.get("kind") == "return"
+    if ret:                                    # vozvrat: qizil sarlavha, boshqa imzo qatorlari
+        d.rectangle([0, 0, W, 16], fill="#c62828")
+    d.text((x0, y), f"ВОЗВРАТ № R-{o['id']}" if ret else f"НАКЛАДНАЯ № {o['id']}", font=_f(46, True), fill="#c62828" if ret else "black")
     d.text((W - x0, y + 8), now.strftime("%d.%m.%Y  %H:%M"), font=_f(30), fill="black", anchor="ra")
     y += 85
     V = x0 + 215
@@ -95,12 +98,26 @@ def make_invoice(o: dict) -> bytes:
         d.text((x0, y), "Агент:", font=fb, fill="black")
         d.text((V, y), _clean(o["agent"]), font=fn, fill="black")
         y += 44
-    d.text((x0, y), "Доставка:", font=fb, fill="black")
-    d.text((V, y), _dd(o.get("ddate")), font=_f(31, True), fill="#b00020")
-    y += 46
-    d.text((x0, y), "Принял:", font=fb, fill="black")
-    d.text((V, y), _clean(o["user_name"]), font=fn, fill="black")
-    y += 56
+    if ret:
+        if o.get("ptype"):
+            d.text((x0, y), "Тип цены:", font=fb, fill="black")
+            d.text((V, y), _clean(o["ptype"]), font=fn, fill="black")
+            y += 44
+        d.text((x0, y), "Склад:", font=fb, fill="black")
+        d.text((V, y), _clean(o["user_name"]), font=fn, fill="black")
+        y += 44
+        if o.get("approved_by"):
+            d.text((x0, y), "Подтвердил:", font=fb, fill="black")
+            d.text((V, y), _clean(o["approved_by"]), font=fn, fill="black")
+            y += 44
+        y += 12
+    else:
+        d.text((x0, y), "Доставка:", font=fb, fill="black")
+        d.text((V, y), _dd(o.get("ddate")), font=_f(31, True), fill="#b00020")
+        y += 46
+        d.text((x0, y), "Принял:", font=fb, fill="black")
+        d.text((V, y), _clean(o["user_name"]), font=fn, fill="black")
+        y += 56
     tw = sum(c[1] for c in cols)
     d.rectangle([x0, y, x0 + tw, y + 54], fill="#e9e9e9", outline="black", width=2)
     x = x0
@@ -147,8 +164,8 @@ def make_invoice(o: dict) -> bytes:
                 y += 30
         y += 14
     y += 50
-    d.text((x0, y), "Отпустил: ____________________", font=fn, fill="black")
-    d.text((x0 + 600, y), "Получил: ____________________", font=fn, fill="black")
+    d.text((x0, y), ("Сдал (клиент): " if ret else "Отпустил: ") + "______________", font=fn, fill="black")
+    d.text((x0 + 600, y), ("Принял (склад): " if ret else "Получил: ") + "______________", font=fn, fill="black")
     y += 60
     im = im.crop((0, 0, W, y))
     out = io.BytesIO()

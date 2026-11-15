@@ -492,3 +492,35 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 @keyframes lkSpin{0%{transform:rotateY(0) translateY(0)}35%{transform:rotateY(0) translateY(-4px)}65%{transform:rotateY(360deg) translateY(-4px)}100%{transform:rotateY(360deg) translateY(0)}}
 @keyframes lkShadow{0%,100%{transform:scaleX(1);opacity:1}50%{transform:scaleX(.55);opacity:.6}}
 @media (prefers-reduced-motion:reduce){.lk-coin,.lk-logo::after{animation:none}}
+
+/* ---------- VOZVRAT (skladchi) ---------- */
+:root{--ret:#3B5BDB;--ret2:#2F4AC0}
+.btn.retbtn{background:linear-gradient(135deg,#4C6EF5,var(--ret2))!important;box-shadow:0 12px 26px rgba(59,91,219,.35)!important}
+.retcard{border-left:5px solid var(--ret)!important}
+.prod .add.retb,.add.retb{background:linear-gradient(135deg,#4C6EF5,var(--ret2))!important}
+.agc{cursor:pointer;position:relative}
+.agc.on{border-color:var(--ret)!important;box-shadow:0 0 0 2px var(--ret) inset,0 10px 24px rgba(59,91,219,.18)!important}
+.agc.on::after{content:"✓";position:absolute;right:14px;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:50%;background:var(--ret);color:#fff;display:grid;place-items:center;font-weight:900}
+.s-rej{color:#d6336c}
+.phgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.ph{position:relative;aspect-ratio:1;border-radius:14px;overflow:hidden;background:#ddd}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph button{position:absolute;top:4px;right:4px;width:26px;height:26px;border:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-weight:900}
+.phadd{aspect-ratio:1;border:2px dashed var(--ret);border-radius:14px;background:rgba(59,91,219,.06);color:var(--ret);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-weight:800;font-size:13px}
+.phadd svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
+#cam{position:fixed;inset:0;z-index:200;background:#000;display:flex;flex-direction:column}
+#cam video{flex:1;width:100%;min-height:0;object-fit:cover}
+.camflash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+.camflash.on{animation:camf .35s ease-out}
+@keyframes camf{0%{opacity:.85}100%{opacity:0}}
+.cambar{position:absolute;left:0;right:0;bottom:0;padding:22px 26px calc(26px + env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:space-between;background:linear-gradient(transparent,rgba(0,0,0,.65))}
+.camx{width:52px;height:52px;border-radius:50%;border:0;background:rgba(255,255,255,.18);color:#fff;font-size:22px;font-weight:800}
+.camshot{width:78px;height:78px;border-radius:50%;border:5px solid #fff;background:transparent;padding:5px}
+.camshot i{display:block;width:100%;height:100%;border-radius:50%;background:#fff;transition:transform .15s}
+.camshot:active i{transform:scale(.85)}
+.camn{min-width:52px;color:#fff;font-weight:800;text-align:right}
+:root{--otk:#D6336C}
+.sk2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.btn.otkbtn{background:linear-gradient(135deg,#E64980,#C2255C)!important;box-shadow:0 12px 26px rgba(214,51,108,.32)!important}
+.otkcard{border-left:5px solid var(--otk)!important}
+.phadd.otk{border-color:var(--otk);color:var(--otk);background:rgba(214,51,108,.06)}
