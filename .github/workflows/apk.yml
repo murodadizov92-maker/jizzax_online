@@ -1,0 +1,39 @@
+name: APK yig'ish
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '2_telefon_ilovasi_APK/**'
+      - '.github/workflows/apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 2_telefon_ilovasi_APK
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: APK yig'ish
+        run: gradle assembleRelease --no-daemon
+
+      - name: Faylni nomlash
+        run: cp app/build/outputs/apk/release/app-release.apk ../MeatCity-Agent.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeatCity-Agent-apk
+          path: MeatCity-Agent.apk
