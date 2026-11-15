@@ -1301,7 +1301,8 @@ async def h_order_create(request):
         if not p or not (0 < qty <= MAX_QTY):
             continue
         stk = p["stock"]
-        items.append({"id": p["id"], "name": p["name"], "price": p["price"], "qty": qty, "unit": p["unit"],
+        items.append({"id": p["id"], "name": p["name"], "price": p["price"], "qty": qty,
+                      "unit": it.get("unit") if it.get("unit") in ("kg", "dona") else p["unit"],   # agent tanlagan birlik
                       "stock": stk, "stock_unit": p["stock_unit"],
                       "short": round(max(0.0, qty - stk), 3) if stk is not None else 0,
                       "note": str(it.get("note", ""))[:200]})  # narx va qoldiq serverdan — doim yangi
@@ -1496,7 +1497,8 @@ def ret_items(raw: list, agent: str, catalog: dict, allow_price=False):
             pr = _num(it.get("price"))
             if 0 <= pr <= 1e9:
                 price = pr
-        items.append({"id": p["id"], "name": p["name"], "price": price, "qty": qty, "unit": p["unit"]})
+        unit = it.get("unit") if it.get("unit") in ("kg", "dona") else p["unit"]     # skladchi tanlagan birlik
+        items.append({"id": p["id"], "name": p["name"], "price": price, "qty": qty, "unit": unit})
         total += price * qty
     return items, total
 

@@ -524,3 +524,7 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 .btn.otkbtn{background:linear-gradient(135deg,#E64980,#C2255C)!important;box-shadow:0 12px 26px rgba(214,51,108,.32)!important}
 .otkcard{border-left:5px solid var(--otk)!important}
 .phadd.otk{border-color:var(--otk);color:var(--otk);background:rgba(214,51,108,.06)}
+.useg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.useg button{border:1.5px solid #D9DCEB;background:#fff;border-radius:12px;padding:8px 4px;font-weight:800;font-size:13px;color:#5E6075}
+.useg button.on{border-color:var(--ret);background:rgba(59,91,219,.1);color:var(--ret)}
+.useg.ord button.on{border-color:var(--acc);background:rgba(242,107,42,.1);color:var(--acc)}

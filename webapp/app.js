@@ -223,12 +223,13 @@ async function playIntro() {
 playIntro();
 
 /* ================================================================== holat */
-const S = { notes: {}, me: null, products: [], cat: 'Hammasi', q: '', cart: JSON.parse(localStorage.getItem('cart') || '{}'), client: null, region: '', tab: 'all', timer: null, stats: { n: 0, sum: 0, way: 0 }, mode: 'order', prodAgent: '', ret: { agent: '', client: '', ptype: '', photos: [], comment: '' } };
+const S = { notes: {}, me: null, products: [], cat: 'Hammasi', q: '', cart: JSON.parse(localStorage.getItem('cart') || '{}'), client: null, region: '', tab: 'all', timer: null, stats: { n: 0, sum: 0, way: 0 }, mode: 'order', prodAgent: '', runit: {}, ret: { agent: '', client: '', ptype: '', photos: [], comment: '' } };
 const RET = () => S.mode === 'ret';                       // skladchi: vozvrat rejimi (savat o'rniga "Qaytarish")
 const saveCart = () => { try { localStorage.setItem(RET() ? 'rcart' : 'cart', JSON.stringify(S.cart)); } catch (e) {} };
 function useMode(m) { if (S.mode === m) return; S.mode = m; try { S.cart = JSON.parse(localStorage.getItem(m === 'ret' ? 'rcart' : 'cart') || '{}'); } catch (e) { S.cart = {}; } }
 const view = $('#view');
-const stepOf = p => p && p.unit === 'kg' ? .5 : 1;
+const ru = p => S.runit[p.id] || p.unit;                       // agent / skladchi shu zakas uchun tanlagan birlik (dona/kg)
+const stepOf = p => p && ru(p) === 'kg' ? .5 : 1;
 const fq = v => (+v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 let _uh;
 function unitHint(t, kg) {                                  // kichik qisqa yozuv: ekran pastida, hamma narsa ustida
@@ -442,10 +443,10 @@ async function pickProducts() {
   const cardHtml = p => `
       <div class="prod ${S.cart[p.id] ? 'sel' : ''}" data-id="${p.id}">
         <div class="im ${p.image ? 'has' : ''}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('ok')" onerror="this.remove()">` : '🥩'}<span class="tag">${esc(p.category)}</span>${p.image ? '<span class="play">▶ Reklama</span>' : ''}</div>
-        <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm / <span class="pr-u ${p.unit === 'kg' ? 'u-kg' : 'u-dona'}">${p.unit === 'kg' ? '⚖️ KG' : '🔢 DONA'}</span></div>
+        <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm / <span class="pr-u ${ru(p) === 'kg' ? 'u-kg' : 'u-dona'}">${ru(p) === 'kg' ? '⚖️ KG' : '🔢 DONA'}</span></div>
           ${(() => { const s = !R && stockInfo(p); return s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''; })()}
-          <div class="qty"><button data-d="-1">−</button><input type="number" inputmode="decimal" min="0" step="any" value="${S.cart[p.id] || ''}" placeholder="0"><button data-d="1">+</button><i class="un">${p.unit === 'kg' ? 'kg' : 'dona'}</i></div>
-          ${S.me && S.me.admin ? `<button class="unb">🔄 ${p.unit === 'kg' ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}</button>` : ''}
+          <div class="qty"><button data-d="-1">−</button><input type="number" inputmode="decimal" min="0" step="any" value="${S.cart[p.id] || ''}" placeholder="0"><button data-d="1">+</button><i class="un">${ru(p) === 'kg' ? 'kg' : 'dona'}</i></div>
+          <div class="useg ${R ? '' : 'ord'}"><button data-u="dona" class="${ru(p) === 'dona' ? 'on' : ''}">🔢 Dona</button><button data-u="kg" class="${ru(p) === 'kg' ? 'on' : ''}">⚖️ Kg</button></div>
           <div class="warn ${!R && shortOf(p, S.cart[p.id]) ? 'on' : ''}">⚠️ Yetmaydi: ${fq(shortOf(p, S.cart[p.id]))} · zakas baribir yoziladi</div>
           <button class="add ${R ? 'retb' : ''}">${R ? '↩️ Qaytarish' : 'Savatga'}</button></div>
       </div>`;
@@ -454,6 +455,12 @@ async function pickProducts() {
     const warn = $('.warn', card);
     const set = v => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); const sh = R ? 0 : shortOf(p, v); warn.classList.toggle('on', !!sh); warn.textContent = `⚠️ Yetmaydi: ${fq(sh)} · zakas baribir yoziladi`; saveCart(); updateCartBar(true); buzz(); };
     $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d * stepOf(p)));
+    $$('.useg button', card).forEach(b => b.onclick = e => {          // vozvrat: faqat shu qaytarish uchun birlik
+      e.stopPropagation(); S.runit[p.id] = b.dataset.u; buzz();
+      $$('.useg button', card).forEach(x => x.classList.toggle('on', x === b));
+      const k = b.dataset.u === 'kg', pu = $('.pr-u', card); pu.textContent = k ? '⚖️ KG' : '🔢 DONA'; pu.className = 'pr-u ' + (k ? 'u-kg' : 'u-dona');
+      $('.qty .un', card).textContent = k ? 'kg' : 'dona'; unitHint(k ? 'kg' : 'dona', k);
+    });
     const ub = $('.unb', card);
     const paintUnit = flash => { const k = p.unit === 'kg'; if (ub) ub.textContent = `🔄 ${k ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}`; const pu = $('.pr-u', card); pu.textContent = k ? '⚖️ KG' : '🔢 DONA'; pu.className = 'pr-u ' + (k ? 'u-kg' : 'u-dona'); $('.qty .un', card).textContent = k ? 'kg' : 'dona'; if (flash) { if (card.animate) { card.animate([{ boxShadow: '0 0 0 0 rgba(238,122,47,0)' }, { boxShadow: '0 0 0 10px rgba(238,122,47,.45)', offset: .25 }, { boxShadow: '0 0 0 0 rgba(238,122,47,0)' }], { duration: 900 }); pu.animate([{ transform: 'scale(.6)' }, { transform: 'scale(1.35)', offset: .5 }, { transform: 'scale(1)' }], { duration: 700, easing: 'cubic-bezier(.3,1.6,.5,1)' }); } unitHint(k ? 'dona → kg' : 'kg → dona', k); } };
     if (ub) ub.onclick = async e => {                      // kartochka qayta chizilmaydi (animatsiyasiz) — faqat yozuv almashadi
@@ -517,7 +524,7 @@ function confirmView() {
       <button class="btn addmore" id="addMore" data-a>➕ Yana mahsulot qo'shish</button>
       ${rows.map(r => { const s = stockInfo(r.p), sh = shortOf(r.p, r.q); return `<div class="card" data-a><div class="row"><b>${esc(r.p.name)}</b><button class="back" data-rm="${r.id}">✕</button></div>
         ${s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''}
-        <div class="row"><span class="mut">${money(r.p.price)} × </span><div class="qty" style="flex:1;max-width:240px;margin:0 8px"><button data-m="${r.id}">−</button><input type="number" step="any" inputmode="decimal" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button><i class="un">${r.p.unit === 'kg' ? 'kg' : 'dona'}</i></div><b>${money(r.p.price * r.q)}</b></div></div>`; }).join('') || '<div class="mut" data-a>Savat bo\'sh</div>'}
+        <div class="row"><span class="mut">${money(r.p.price)} × </span><div class="qty" style="flex:1;max-width:240px;margin:0 8px"><button data-m="${r.id}">−</button><input type="number" step="any" inputmode="decimal" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button><i class="un">${ru(r.p) === 'kg' ? 'kg' : 'dona'}</i></div><b>${money(r.p.price * r.q)}</b></div></div>`; }).join('') || '<div class="mut" data-a>Savat bo\'sh</div>'}
       ${(() => { const sr = rows.filter(r => shortOf(r.p, r.q)); return sr.length ? `<div class="card shortcard" data-a><b>⚠️ Skladda yetmaydigan mahsulotlar</b>
         <div class="mut" style="margin:4px 0 8px">Zakas baribir yoziladi. Yetmasa nima qilish kerakligini izohda yozing (masalan: "boshqa turidan bering").</div>
         <table class="stbl"><tr><th>Mahsulot</th><th>So'ralgan</th><th>Skladda</th><th>Yetmaydi</th></tr>
@@ -540,12 +547,12 @@ function confirmView() {
       $('#send').disabled = true; const txt = $('#send').textContent; $('#send').textContent = '⏳ Yuborilmoqda…';
       try {
         let rid = LS.get('req_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('req_id', rid); }   // bitta zakas = bitta ID
-        const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty, note: S.notes[id] || '' }));
+        const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty, note: S.notes[id] || '', unit: S.runit[id] || (S.products.find(p => p.id === id) || {}).unit }));
         const local = items.reduce((s, it) => { const p = S.products.find(x => x.id === it.id); return s + (p ? p.price * it.qty : 0); }, 0);
         const res = await api('/api/orders', { method: 'POST', retry: 3, json: { client_id: S.client.id, items, comment: $('#cm').value, ddate: window.__dd, req_id: rid } });
         const order = res.order;
         LS.set('req_id', null);
-        S.cart = {}; S.notes = {}; saveCart(); S.client = null; buzz('heavy'); confetti();
+        S.cart = {}; S.notes = {}; S.runit = {}; saveCart(); S.client = null; buzz('heavy'); confetti();
         toast(res.duplicate ? 'Zakas avval yuborilgan edi ✅' : res.skipped ? `Zakas yuborildi ✅ (${res.skipped} ta mahsulot topilmadi)` : Math.round(local) !== Math.round(order.total) ? 'Zakas yuborildi ✅ Narx yangilangan: ' + money(order.total) : 'Zakas yuborildi ✅');
         S.tab = 'mine'; detail(order); banner && banner.setProgress(ST.new[1]);
       } catch (e) { toast(e.network ? e.message + ' — savat saqlangan' : e.message); $('#send').disabled = false; $('#send').textContent = txt; }
@@ -698,8 +705,8 @@ function retConfirm() {
       <div class="card retcard" data-a><b>↩️ ${esc(S.ret.client)}</b><div class="mut">🧑‍💼 ${esc(S.ret.agent)}${S.ret.ptype ? ' · 💲 ' + esc(S.ret.ptype) : ''}</div></div>
       <button class="btn addmore" id="addMore" data-a>➕ Yana mahsulot qo'shish</button>
       ${rows.map(r => `<div class="card" data-a><div class="row"><b>${esc(r.p.name)}</b><button class="back" data-rm="${r.id}">✕</button></div>
-        <div class="qty" style="margin:8px 0 6px"><button data-m="${r.id}">−</button><input type="number" step="any" inputmode="decimal" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button><i class="un">${r.p.unit === 'kg' ? 'kg' : 'dona'}</i></div>
-        <div class="row"><span class="mut">${money(r.p.price)} so'm × ${fq(r.q)}</span><b>${money(r.p.price * r.q)} so'm</b></div></div>`).join('') || '<div class="mut" data-a>Hech narsa tanlanmagan</div>'}
+        <div class="qty" style="margin:8px 0 6px"><button data-m="${r.id}">−</button><input type="number" step="any" inputmode="decimal" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button><i class="un">${ru(r.p) === 'kg' ? 'kg' : 'dona'}</i></div>
+        <div class="row"><span class="mut">${money(r.p.price)} so'm × ${fq(r.q)} ${ru(r.p) === 'kg' ? 'kg' : 'dona'}</span><b>${money(r.p.price * r.q)} so'm</b></div></div>`).join('') || '<div class="mut" data-a>Hech narsa tanlanmagan</div>'}
       <textarea id="cm" rows="2" placeholder="💬 Sabab / izoh (masalan: muddati o'tgan, sifatsiz)" data-a>${esc(S.ret.comment)}</textarea>
       <div class="row" style="margin:14px 0" data-a><span>Jami</span><span class="sum"><span id="tot">0</span> so'm</span></div>
       <button class="btn retbtn" id="send" data-a ${rows.length ? '' : 'disabled'}>↩️ Qaytarishni tasdiqqa yuborish</button>`);
@@ -716,9 +723,9 @@ function retConfirm() {
       b.disabled = true; const txt = b.textContent; b.textContent = '⏳ Yuborilmoqda…';
       try {
         let rid = LS.get('rreq_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('rreq_id', rid); }
-        const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty }));
+        const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty, unit: S.runit[id] || (S.products.find(p => p.id === id) || {}).unit }));
         const res = await api('/api/returns', { method: 'POST', retry: 2, timeout: 120000, json: { agent: S.ret.agent, client_name: S.ret.client, items, comment: S.ret.comment, req_id: rid } });
-        LS.set('rreq_id', null); S.cart = {}; saveCart(); S.ret = { agent: '', client: '', ptype: '', photos: [], comment: '' };
+        LS.set('rreq_id', null); S.cart = {}; S.runit = {}; saveCart(); S.ret = { agent: '', client: '', ptype: '', photos: [], comment: '' };
         buzz('heavy'); confetti(); toast(res.duplicate ? 'Avval yuborilgan edi ✅' : `✅ Vozvrat R-${res.ret.id} tasdiqqa yuborildi`); retHome();
       } catch (e) { toast(e.network ? e.message + ' — ma\'lumot saqlangan' : e.message); b.disabled = false; b.textContent = txt; }
     };
@@ -835,7 +842,7 @@ function showLock(onOpen, mode = 'unlock', mandatory = false) {          // mode
   if (mandatory) { title.set = "O'zingizga 4 xonali kod qo'ying"; sub.set = 'Keyingi safar ilovaga shu kod bilan kirasiz'; }
   const draw = () => {
     const showPad = mode !== 'unlock' || LS.get('pinh');
-    L.innerHTML = `<div class="lk-logo"><div class="lk-coin"><img src="/static/logo.png" alt="MeatCity"><img src="/static/logo.png" alt="" aria-hidden="true" class="bk"></div></div><div class="lk-brand">MEATCITY · AGENT</div>
+    L.innerHTML = `<div class="lk-logo"><div class="lk-coin"><img src="/static/logo.png" alt="MeatCity"><img src="/static/logo.png" alt="" aria-hidden="true" class="bk"></div></div><div class="lk-brand">MEATCITY · XODIM</div>
       <div class="lk-hi">${title[mode]}</div><div class="lk-sub">${sub[mode]}</div>
       ${showPad ? `<div class="lk-dots">${[0, 1, 2, 3].map(i => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join('')}</div>` : '<div style="height:40px"></div>'}
       <div class="lk-keys">${showPad ? [1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => `<button type="button" data-k="${k}">${k}</button>`).join('') : ''}
@@ -941,7 +948,7 @@ setInterval(() => { if (S.me && S.me.allowed && !document.hidden) pollNotes(); }
 function loginView() {
   setDock(null); updateCartBar(false); setBack(null);
   const L = $('#lock');
-  L.innerHTML = `<div class="lk-logo"><div class="lk-coin"><img src="/static/logo.png" alt="MeatCity"><img src="/static/logo.png" alt="" aria-hidden="true" class="bk"></div></div><div class="lk-brand">MEATCITY · AGENT</div>
+  L.innerHTML = `<div class="lk-logo"><div class="lk-coin"><img src="/static/logo.png" alt="MeatCity"><img src="/static/logo.png" alt="" aria-hidden="true" class="bk"></div></div><div class="lk-brand">MEATCITY · XODIM</div>
     <div class="lk-hi">Ilovaga kirish</div><div class="lk-sub">Admin bergan login va parolni kiriting</div>
     <form id="lgForm" style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;margin-top:18px">
       <label class="mut" style="font-size:13px;font-weight:700">Login<input id="lgL" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" style="margin-top:4px;width:100%;box-sizing:border-box;height:52px;padding:0 14px;font-size:17px"></label>
