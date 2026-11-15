@@ -802,8 +802,7 @@ function adminView() {
 (function () {
   let big = '1'; try { big = localStorage.getItem('big') || '1'; } catch (e) {}
   const apply = () => { document.body.classList.toggle('big', big === '1'); const b = $('#aa'); if (b) b.textContent = big === '1' ? 'Aa −' : 'Aa +'; };
-  const btn = document.createElement('button'); btn.id = 'aa'; btn.setAttribute('aria-label', 'Yozuv o\'lchami'); $('#top').appendChild(btn);
-  btn.onclick = e => { e.stopPropagation(); big = big === '1' ? '0' : '1'; try { localStorage.setItem('big', big); } catch (er) {} apply(); buzz(); };
+  // tepadagi "Aa" tugmasi olib tashlandi — katta yozuv faqat Profil → "Katta yozuv" da yoqiladi/o'chiriladi
   apply();
 })();
 
