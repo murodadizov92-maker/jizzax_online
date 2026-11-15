@@ -1,6 +1,8 @@
 package uz.meatcity.zakas;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.pm.PackageManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
@@ -8,6 +10,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -33,6 +36,8 @@ public class MainActivity extends AppCompatActivity {
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
     private ActivityResultLauncher<Intent> filePicker;
+    private ActivityResultLauncher<String> camPerm;
+    private PermissionRequest pendingPerm;
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
@@ -71,7 +76,31 @@ public class MainActivity extends AppCompatActivity {
             fileCallback.onReceiveValue(res);
             fileCallback = null;
         });
+        camPerm = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+            if (pendingPerm == null) return;
+            if (granted) pendingPerm.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            else pendingPerm.deny();
+            pendingPerm = null;
+        });
         web.setWebChromeClient(new WebChromeClient() {
+            // vozvrat foto tasdig'i: sahifa ichidagi kamera (faqat o'z saytimizga ruxsat)
+            @Override
+            public void onPermissionRequest(final PermissionRequest req) {
+                runOnUiThread(() -> {
+                    boolean cam = false;
+                    for (String r : req.getResources()) if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) cam = true;
+                    String host = Uri.parse(BuildConfig.APP_URL).getHost();
+                    if (!cam || host == null || !host.equals(req.getOrigin().getHost())) { req.deny(); return; }
+                    if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        req.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                    } else {
+                        if (pendingPerm != null) pendingPerm.deny();
+                        pendingPerm = req;
+                        camPerm.launch(Manifest.permission.CAMERA);
+                    }
+                });
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);

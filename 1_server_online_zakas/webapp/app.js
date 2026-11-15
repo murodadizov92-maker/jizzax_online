@@ -223,8 +223,10 @@ async function playIntro() {
 playIntro();
 
 /* ================================================================== holat */
-const S = { notes: {}, me: null, products: [], cat: 'Hammasi', q: '', cart: JSON.parse(localStorage.getItem('cart') || '{}'), client: null, region: '', tab: 'all', timer: null, stats: { n: 0, sum: 0, way: 0 } };
-const saveCart = () => { try { localStorage.setItem('cart', JSON.stringify(S.cart)); } catch (e) {} };
+const S = { notes: {}, me: null, products: [], cat: 'Hammasi', q: '', cart: JSON.parse(localStorage.getItem('cart') || '{}'), client: null, region: '', tab: 'all', timer: null, stats: { n: 0, sum: 0, way: 0 }, mode: 'order', prodAgent: '', ret: { agent: '', client: '', ptype: '', photos: [], comment: '' } };
+const RET = () => S.mode === 'ret';                       // skladchi: vozvrat rejimi (savat o'rniga "Qaytarish")
+const saveCart = () => { try { localStorage.setItem(RET() ? 'rcart' : 'cart', JSON.stringify(S.cart)); } catch (e) {} };
+function useMode(m) { if (S.mode === m) return; S.mode = m; try { S.cart = JSON.parse(localStorage.getItem(m === 'ret' ? 'rcart' : 'cart') || '{}'); } catch (e) { S.cart = {}; } }
 const view = $('#view');
 const stepOf = p => p && p.unit === 'kg' ? .5 : 1;
 const fq = v => (+v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
@@ -254,7 +256,7 @@ let lastCart = '';
 function updateCartBar(show) {
   const bar = $('#cartbar'), n = cartCount();
   bar.classList.toggle('hidden', !(show && n));
-  const label = `🛒 Savat: ${n} ta · ${money(cartSum())} so'm →`;
+  const label = RET() ? `↩️ Qaytarish: ${n} ta · ${money(cartSum())} so'm →` : `🛒 Savat: ${n} ta · ${money(cartSum())} so'm →`;
   if (label !== lastCart) { $('#cartBtn').textContent = label; lastCart = label; const b = $('#cartBtn'); b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
 }
 function clearTimer() { clearInterval(S.timer); S.timer = null; }
@@ -277,7 +279,7 @@ function setDock(name) {
   });
 }
 const redock = () => { const on = $('#dock button.on'); on && setDock(on.dataset.d); };
-$$('#dock button').forEach(b => b.onclick = () => { buzz(); const dk = $('#dock'); if (dk.classList.contains('mini')) { dk.classList.remove('mini'); redock(); return; } ({ home, new: newOrder, admin: adminView, profile: profileView, notes: notesView })[b.dataset.d](); });
+$$('#dock button').forEach(b => b.onclick = () => { buzz(); const dk = $('#dock'); if (dk.classList.contains('mini')) { dk.classList.remove('mini'); redock(); return; } (S.me && S.me.role === 'sklad' ? { home: retHome, new: retNew, profile: profileView, notes: notesView } : { home, new: newOrder, admin: adminView, profile: profileView, notes: notesView })[b.dataset.d](); });
 // pastga aylantirilganda dock yig'iladi (faqat faol tugma qoladi), tepaga aylantirilsa yoki bosilsa ochiladi
 let lastY = 0; addEventListener('scroll', () => { const y = scrollY, d = y - lastY; lastY = y; const dk = $('#dock'); if (dk.classList.contains('hidden')) return; const m = dk.classList.contains('mini'); if (!m && d > 8 && y > 90) { dk.classList.add('mini'); redock(); } else if (m && d < -8) { dk.classList.remove('mini'); redock(); } }, { passive: true });
 addEventListener('resize', () => { const on = $('#dock button.on'); on && setDock(on.dataset.d); });
@@ -288,6 +290,7 @@ function paintTabsPill() {
   p.style.left = on.offsetLeft + 'px'; p.style.width = on.offsetWidth + 'px';
 }
 async function home() {
+  if (S.me.role === 'sklad') return retHome();
   clearTimer(); setBack(null); updateCartBar(false); setDock('home'); banner && banner.setProgress(null);
   render(`
     <div class="stats" data-a>
@@ -351,6 +354,8 @@ function detail(o) {
 
 /* ================================================================== 1) mijoz */
 async function newOrder() {
+  if (S.me.role === 'sklad') return retNew();
+  useMode('order'); if (S.prodAgent) { S.prodAgent = ''; S.products = []; }
   clearTimer(); setBack(home); updateCartBar(false); setDock('new'); banner && banner.setProgress(null);
   S.region = S.me.admin ? (S.me.region || '') : (S.me.agent || ''); let agents = [];
   try { agents = (await api('/api/regions')).items; } catch (e) {}
@@ -419,15 +424,16 @@ async function newOrder() {
 
 /* ================================================================== 2) mahsulotlar */
 async function pickProducts() {
-  setBack(newOrder); setDock(null);
-  if (!S.products.length) {
+  const R = RET(), purl = R ? '/api/products?agent=' + encodeURIComponent(S.ret.agent) : '/api/products';
+  setBack(R ? retNew : newOrder); setDock(null);
+  if (!S.products.length || (R && S.prodAgent !== S.ret.agent)) {
     render('<div class="grid">' + '<div class="sk" style="height:220px;border-radius:22px"></div>'.repeat(4) + '</div>');
-    try { S.products = (await api('/api/products')).items; } catch (e) { toast(e.message); return; }
-  } else api('/api/products').then(r => { S.products = r.items; }).catch(() => {});
+    try { const r = await api(purl); S.products = r.items; if (R) { S.prodAgent = S.ret.agent; S.ret.ptype = r.ptype || ''; } } catch (e) { toast(e.message); return; }
+  } else api(purl).then(r => { S.products = r.items; }).catch(() => {});
   const cats = ['Hammasi', ...new Set(S.products.map(p => p.category))];
   render(`
-    <div class="steps" data-a><span>1. Mijoz</span><span class="on">2. Mahsulot</span><span>3. Tasdiq</span></div>
-    <div class="card" style="margin-top:0" data-a><b>${esc(S.client.name)}</b> <span class="mut">${S.client.agent ? '🧑‍💼 ' + esc(S.client.agent) : esc(S.client.region)}</span></div>
+    <div class="steps" data-a><span>1. ${R ? 'Agent' : 'Mijoz'}</span><span class="on">2. Mahsulot</span><span>3. Tasdiq</span></div>
+    ${R ? `<div class="card retcard" style="margin-top:0" data-a><b>↩️ ${esc(S.ret.client)}</b><div class="mut">🧑‍💼 ${esc(S.ret.agent)}${S.ret.ptype ? ' · 💲 ' + esc(S.ret.ptype) : ''}</div></div>` : `<div class="card" style="margin-top:0" data-a><b>${esc(S.client.name)}</b> <span class="mut">${S.client.agent ? '🧑‍💼 ' + esc(S.client.agent) : esc(S.client.region)}</span></div>`}
     <input id="pq" placeholder="🔍 Mahsulot qidirish…" value="${esc(S.q)}" data-a>
     <div class="chips" id="cats" data-a>${cats.map(c => `<div class="chip ${c === S.cat ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}</div>`).join('')}</div>
     <div class="grid" id="grid"></div><div id="sent" style="height:1px"></div>`);
@@ -437,16 +443,16 @@ async function pickProducts() {
       <div class="prod ${S.cart[p.id] ? 'sel' : ''}" data-id="${p.id}">
         <div class="im ${p.image ? 'has' : ''}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" decoding="async" onload="this.classList.add('ok')" onerror="this.remove()">` : '🥩'}<span class="tag">${esc(p.category)}</span>${p.image ? '<span class="play">▶ Reklama</span>' : ''}</div>
         <div class="in"><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)} so'm / <span class="pr-u ${p.unit === 'kg' ? 'u-kg' : 'u-dona'}">${p.unit === 'kg' ? '⚖️ KG' : '🔢 DONA'}</span></div>
-          ${(() => { const s = stockInfo(p); return s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''; })()}
+          ${(() => { const s = !R && stockInfo(p); return s ? `<div class="stk ${s.cls}">${s.text}</div>` : ''; })()}
           <div class="qty"><button data-d="-1">−</button><input type="number" inputmode="decimal" min="0" step="any" value="${S.cart[p.id] || ''}" placeholder="0"><button data-d="1">+</button><i class="un">${p.unit === 'kg' ? 'kg' : 'dona'}</i></div>
           ${S.me && S.me.admin ? `<button class="unb">🔄 ${p.unit === 'kg' ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}</button>` : ''}
-          <div class="warn ${shortOf(p, S.cart[p.id]) ? 'on' : ''}">⚠️ Yetmaydi: ${fq(shortOf(p, S.cart[p.id]))} · zakas baribir yoziladi</div>
-          <button class="add">Savatga</button></div>
+          <div class="warn ${!R && shortOf(p, S.cart[p.id]) ? 'on' : ''}">⚠️ Yetmaydi: ${fq(shortOf(p, S.cart[p.id]))} · zakas baribir yoziladi</div>
+          <button class="add ${R ? 'retb' : ''}">${R ? '↩️ Qaytarish' : 'Savatga'}</button></div>
       </div>`;
   const bindCard = (card, p) => {
     const id = card.dataset.id, inp = $('input', card);
     const warn = $('.warn', card);
-    const set = v => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); const sh = shortOf(p, v); warn.classList.toggle('on', !!sh); warn.textContent = `⚠️ Yetmaydi: ${fq(sh)} · zakas baribir yoziladi`; saveCart(); updateCartBar(true); buzz(); };
+    const set = v => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; inp.value = v || ''; card.classList.toggle('sel', !!v); const sh = R ? 0 : shortOf(p, v); warn.classList.toggle('on', !!sh); warn.textContent = `⚠️ Yetmaydi: ${fq(sh)} · zakas baribir yoziladi`; saveCart(); updateCartBar(true); buzz(); };
     $$('[data-d]', card).forEach(b => b.onclick = () => set((+inp.value || 0) + +b.dataset.d * stepOf(p)));
     const ub = $('.unb', card);
     const paintUnit = flash => { const k = p.unit === 'kg'; if (ub) ub.textContent = `🔄 ${k ? 'kg → dona' : 'dona → kg'}${p.unit_set ? '' : ' ?'}`; const pu = $('.pr-u', card); pu.textContent = k ? '⚖️ KG' : '🔢 DONA'; pu.className = 'pr-u ' + (k ? 'u-kg' : 'u-dona'); $('.qty .un', card).textContent = k ? 'kg' : 'dona'; if (flash) { if (card.animate) { card.animate([{ boxShadow: '0 0 0 0 rgba(238,122,47,0)' }, { boxShadow: '0 0 0 10px rgba(238,122,47,.45)', offset: .25 }, { boxShadow: '0 0 0 0 rgba(238,122,47,0)' }], { duration: 900 }); pu.animate([{ transform: 'scale(.6)' }, { transform: 'scale(1.35)', offset: .5 }, { transform: 'scale(1)' }], { duration: 700, easing: 'cubic-bezier(.3,1.6,.5,1)' }); } unitHint(k ? 'dona → kg' : 'kg → dona', k); } };
@@ -460,7 +466,7 @@ async function pickProducts() {
     if (p.image) $('.im', card).onclick = () => {
       buzz('medium'); const prev = backFn;
       setBack(() => window.__adClose && window.__adClose()); window.__adBack = () => setBack(prev);
-      window.openAd(p, () => { if (!+inp.value) set(1); toast('Savatga qo\'shildi'); });
+      window.openAd(p, () => { if (!+inp.value) set(1); toast(R ? 'Qaytarishga qo\'shildi' : 'Savatga qo\'shildi'); });
     };
     bindTilt(card);
   };
@@ -477,7 +483,7 @@ async function pickProducts() {
   const draw = () => {
     const q = S.q.toLowerCase();
     list = S.products.filter(p => (S.cat === 'Hammasi' || p.category === S.cat) && (!q || p.name.toLowerCase().includes(q)));
-    const rank = p => p.stock != null && p.stock > 0 ? 0 : p.stock == null ? 1 : 2;     // avval skladda borlar, keyin qoldig'i noma'lum, oxirida yo'qlar
+    const rank = p => R ? 0 : p.stock != null && p.stock > 0 ? 0 : p.stock == null ? 1 : 2;     // avval skladda borlar, keyin qoldig'i noma'lum, oxirida yo'qlar
     list = list.map((p, i) => [p, i]).sort((x, y) => rank(x[0]) - rank(y[0]) || x[1] - y[1]).map(x => x[0]);
     shown = 0; $('#grid').innerHTML = '';
     if (!list.length) { $('#grid').innerHTML = '<div class="mut" style="grid-column:1/-1;text-align:center;padding:24px">Hech narsa topilmadi</div>'; return; }
@@ -486,7 +492,7 @@ async function pickProducts() {
   };
   $$('#cats .chip').forEach(c => c.onclick = () => { S.cat = c.dataset.c; buzz(); $$('#cats .chip').forEach(x => x.classList.toggle('on', x === c)); draw(); });
   let pqT; $('#pq').oninput = e => { S.q = e.target.value; clearTimeout(pqT); pqT = setTimeout(draw, 140); };
-  $('#cartBtn').onclick = confirmView;
+  $('#cartBtn').onclick = R ? retConfirm : confirmView;
   draw(); updateCartBar(true);
 }
 function fly(src) {
@@ -501,6 +507,7 @@ function fly(src) {
 
 /* ================================================================== 3) tasdiq */
 function confirmView() {
+  if (RET()) return retConfirm();
   setBack(pickProducts); updateCartBar(false); setDock(null);
   const draw = () => {
     const rows = Object.entries(S.cart).map(([id, q]) => ({ p: S.products.find(p => p.id === id), id, q })).filter(r => r.p);
@@ -547,17 +554,189 @@ function confirmView() {
   draw();
 }
 
+/* ================================================================== VOZVRAT (skladchi) */
+const RST = { pending: ['⏳ Tasdiq kutilmoqda', 'new'], approved: ['✅ Tasdiqlandi', 'delivered'], rejected: ['❌ Rad etildi', 'rej'] };
+async function retHome() {
+  clearTimer(); setBack(null); updateCartBar(false); setDock('home'); banner && banner.setProgress(null); useMode('ret');
+  S.stab = S.stab || 'ret';
+  render(`
+    <div class="sk2" data-a><button class="btn retbtn" id="rnew">↩️ Vozvrat</button><button class="btn otkbtn" id="onew">🚫 Otkaz zakas</button></div>
+    <div class="tabs" data-a><i class="pill"></i><div class="tab ${S.stab === 'ret' ? 'on' : ''}" data-t="ret">Vozvratlar</div><div class="tab ${S.stab === 'otk' ? 'on' : ''}" data-t="otk">Otkazlar</div></div>
+    <div id="list"><div class="sk"></div><div class="sk"></div></div>`);
+  $('#rnew').onclick = retNew; $('#onew').onclick = otkNew;
+  setTimeout(paintTabsPill, 30);
+  let sig = '';
+  $$('.tab').forEach(t => t.onclick = () => { S.stab = t.dataset.t; $$('.tab').forEach(x => x.classList.toggle('on', x === t)); paintTabsPill(); buzz(); sig = ''; load(); });
+  const tm = t => new Date(t * 1000).toLocaleString('uz', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const load = async () => {
+    const tab = S.stab;
+    try {
+      const { items } = await api(tab === 'ret' ? '/api/returns' : '/api/otkaz');
+      if (tab !== S.stab) return;
+      const ns = tab + JSON.stringify(items.map(r => [r.id, r.status || r.sent])); if (ns === sig) return; sig = ns;
+      $('#list').innerHTML = !items.length ? `<div class="mut" style="text-align:center;padding:30px">${tab === 'ret' ? 'Hali vozvrat kiritilmagan' : 'Hali otkaz kiritilmagan'}</div>` : tab === 'ret' ? items.map(r => `
+        <div class="card rise">
+          <div class="row"><b>R-${r.id} · ${esc(r.client_name)}</b><span class="badge s-${RST[r.status][1]}">${RST[r.status][0]}</span></div>
+          <div class="mut">🧑‍💼 ${esc(r.agent)} · ${tm(r.created)}</div>
+          ${r.client_typed && r.client_typed !== r.client_name ? `<div class="mut" style="font-size:12px">Yozilgan: ${esc(r.client_typed)}</div>` : ''}
+          <div class="row" style="margin-top:6px"><span class="mut">${r.items.length} ta mahsulot</span><b>${money(r.total)} so'm</b></div>
+          ${r.status === 'rejected' && r.reason ? `<div class="stk out" style="margin-top:6px">Sabab: ${esc(r.reason)}</div>` : ''}
+        </div>`).join('') : items.map(o => `
+        <div class="card rise otkcard">
+          <div class="row"><b>🚫 Zakas № ${esc(o.order_no)}</b><span class="badge ${o.sent ? 's-delivered' : 's-new'}">${o.sent ? '✅ Guruhga ketdi' : '📋 Saqlandi'}</span></div>
+          <div class="mut">🏪 ${esc(o.client_name)} · ${tm(o.created)} · 📷 ${o.photos.length}</div>
+          ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}
+        </div>`).join('');
+    } catch (e) { $('#list').innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
+  };
+  await load(); S.timer = setInterval(load, 25000);
+}
+
+async function otkNew() {                          // otkaz zakas: mijoz + zakas raqami + mahsulot rasmlari
+  clearTimer(); setBack(retHome); updateCartBar(false); setDock(null);
+  const O = S.otk = S.otk || { client: '', no: '', photos: [], comment: '' };
+  const draw = () => {
+    render(`
+      <h2 data-a style="margin:4px 0 10px">🚫 Otkaz zakas</h2>
+      <div class="card otkcard" data-a>
+        <b>🏪 Mijoz nomi</b><input id="oc" placeholder="Masalan: 25-do'kon" autocomplete="off" value="${esc(O.client)}" style="margin-top:6px">
+        <b style="display:block;margin-top:12px">🧾 Zakas raqami</b><input id="on" placeholder="Masalan: 1254" autocomplete="off" inputmode="text" value="${esc(O.no)}" style="margin-top:6px"></div>
+      <div class="card otkcard" data-a><b>📷 Mahsulot rasmi</b>
+        <div class="mut" style="font-size:13px;margin-top:4px">Qaytgan mahsulotni rasmga oling — kamera ochiladi.</div>
+        <div class="phgrid">${O.photos.map((u, i) => `<div class="ph"><img src="${u}" alt=""><button data-px="${i}">✕</button></div>`).join('')}
+          ${O.photos.length < 10 ? `<button class="phadd otk" id="shot"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>${O.photos.length ? 'Yana' : 'Rasmga olish'}</span></button>` : ''}</div></div>
+      <textarea id="ocm" rows="2" placeholder="💬 Izoh (ixtiyoriy): sababi" data-a>${esc(O.comment)}</textarea>
+      <button class="btn otkbtn" id="osend" data-a style="margin-top:12px">🚫 Otkazni yuborish</button>`);
+    $('#oc').oninput = e => { O.client = e.target.value; };
+    $('#on').oninput = e => { O.no = e.target.value; };
+    $('#ocm').oninput = e => { O.comment = e.target.value; };
+    $$('[data-px]').forEach(b => b.onclick = () => { O.photos.splice(+b.dataset.px, 1); buzz(); draw(); });
+    const shot = $('#shot'); if (shot) shot.onclick = () => openCamera(u => { if (O.photos.length >= 10) return; O.photos.push(u); O._dirty = true; });
+    $('#osend').onclick = async () => {
+      const b = $('#osend'); if (b.disabled) return;
+      if (O.client.trim().length < 2) { $('#oc').focus(); return toast('Mijoz nomini yozing'); }
+      if (!O.no.trim()) { $('#on').focus(); return toast('Zakas raqamini yozing'); }
+      if (!O.photos.length) return toast('Mahsulotni rasmga oling');
+      b.disabled = true; b.textContent = '⏳ Yuborilmoqda…';
+      try {
+        let rid = LS.get('oreq_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('oreq_id', rid); }
+        const r = await api('/api/otkaz', { method: 'POST', retry: 2, timeout: 120000, json: { client_name: O.client, order_no: O.no, photos: O.photos, comment: O.comment, req_id: rid } });
+        LS.set('oreq_id', null); S.otk = null; buzz('heavy'); confetti();
+        toast(r.warn ? '✅ Saqlandi (guruhga ketmadi: ' + r.warn + ')' : '✅ Otkaz guruhga yuborildi'); S.stab = 'otk'; retHome();
+      } catch (e) { toast(e.message); b.disabled = false; b.textContent = '🚫 Otkazni yuborish'; }
+    };
+  };
+  draw();
+  const iv = setInterval(() => { if (S.otk !== O || !document.getElementById('osend')) return clearInterval(iv); if (!document.getElementById('cam') && O._dirty) { O._dirty = false; draw(); } }, 300);
+}
+
+async function retNew() {
+  clearTimer(); setBack(retHome); updateCartBar(false); setDock('new'); useMode('ret');
+  render(`
+    <div class="steps" data-a><span class="on">1. Agent</span><span>2. Mahsulot</span><span>3. Tasdiq</span></div>
+    <div class="nchead" data-a>Qaysi agentning mijozi qaytardi?</div>
+    <div id="agl" data-a><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+    <div class="card" data-a><b>🏪 Mijoz (do'kon) nomi</b>
+      <input id="rcl" placeholder="Masalan: 25-do'kon, Anvar aka" autocomplete="off" value="${esc(S.ret.client)}" style="margin-top:8px">
+      <div class="mut" style="font-size:12px;margin-top:6px">Bilganingizcha yozing — admin tasdiqlashda bazadagi mijozga bog'laydi.</div></div>
+    <button class="btn" id="rgo" data-a>Davom etish →</button>`);
+  let agents = [];
+  try { agents = (await api('/api/ret/agents')).items; } catch (e) { $('#agl').innerHTML = `<div class="mut">${esc(e.message)}</div>`; return; }
+  const draw = () => {
+    $('#agl').innerHTML = agents.map(a => `<div class="client agc ${S.ret.agent === a.agent ? 'on' : ''}" data-ag="${esc(a.agent)}"><b>🧑‍💼 ${esc(a.agent)}</b><div class="mut">${a.ptype ? '💲 Narx turi: ' + esc(a.ptype) : 'Narx turi biriktirilmagan (asosiy narx)'}</div></div>`).join('') || '<div class="mut">Agentlar topilmadi</div>';
+    $$('#agl [data-ag]').forEach(el => el.onclick = () => { buzz('medium'); if (S.ret.agent !== el.dataset.ag) { S.cart = {}; saveCart(); } S.ret.agent = el.dataset.ag; draw(); });
+  };
+  draw();
+  $('#rcl').oninput = e => { S.ret.client = e.target.value; };
+  $('#rgo').onclick = () => {
+    S.ret.client = $('#rcl').value.trim();
+    if (!S.ret.agent) return toast('Agentni tanlang');
+    if (S.ret.client.length < 2) { $('#rcl').focus(); return toast('Mijoz nomini yozing'); }
+    buzz('medium'); pickProducts();
+  };
+}
+
+function shrink(src, max = 1280) {                 // rasmni kichraytirib JPEG qiladi (internetni tejaydi)
+  return new Promise((res, rej) => {
+    const go = img => { const k = Math.min(1, max / Math.max(img.width || img.videoWidth, img.height || img.videoHeight)); const w = Math.round((img.width || img.videoWidth) * k), h = Math.round((img.height || img.videoHeight) * k); const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(img, 0, 0, w, h); res(c.toDataURL('image/jpeg', .78)); };
+    if (src instanceof HTMLVideoElement) return go(src);
+    const im = new Image(); im.onload = () => { go(im); URL.revokeObjectURL(im.src); }; im.onerror = () => rej(new Error('Rasm o\'qilmadi')); im.src = URL.createObjectURL(src);
+  });
+}
+function fileCamera(onShot) {                      // zaxira: telefonning o'z kamera oynasi
+  const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.setAttribute('capture', 'environment');
+  i.onchange = async () => { const f = i.files[0]; if (!f) return; try { onShot(await shrink(f)); } catch (e) { toast(e.message); } };
+  i.click();
+}
+async function openCamera(onShot) {                // ilova ichida jonli kamera: bosildi — rasm tushdi
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fileCamera(onShot);
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
+  catch (e) { return fileCamera(onShot); }
+  const box = document.createElement('div'); box.id = 'cam';
+  box.innerHTML = `<video autoplay playsinline muted></video><div class="camflash"></div>
+    <div class="cambar"><button class="camx" aria-label="Yopish">✕</button><button class="camshot" aria-label="Rasmga olish"><i></i></button><span class="camn"></span></div>`;
+  document.body.appendChild(box);
+  const v = $('video', box); v.srcObject = stream;
+  let n = 0;
+  const close = () => { stream.getTracks().forEach(t => t.stop()); box.remove(); if (prevBack !== undefined) setBack(prevBack); };
+  const prevBack = backFn; setBack(close);
+  $('.camx', box).onclick = close;
+  $('.camshot', box).onclick = async () => {
+    if (!v.videoWidth) return;
+    buzz('heavy'); const fl = $('.camflash', box); fl.classList.remove('on'); void fl.offsetWidth; fl.classList.add('on');
+    onShot(await shrink(v)); n++; $('.camn', box).textContent = n + ' ta ✓';
+  };
+}
+
+function retConfirm() {
+  setBack(pickProducts); updateCartBar(false); setDock(null);
+  const draw = () => {
+    const rows = Object.entries(S.cart).map(([id, q]) => ({ p: S.products.find(p => p.id === id), id, q })).filter(r => r.p);
+    render(`
+      <div class="steps" data-a><span>1. Agent</span><span id="toPick" style="cursor:pointer">2. Mahsulot</span><span class="on">3. Tasdiq</span></div>
+      <div class="card retcard" data-a><b>↩️ ${esc(S.ret.client)}</b><div class="mut">🧑‍💼 ${esc(S.ret.agent)}${S.ret.ptype ? ' · 💲 ' + esc(S.ret.ptype) : ''}</div></div>
+      <button class="btn addmore" id="addMore" data-a>➕ Yana mahsulot qo'shish</button>
+      ${rows.map(r => `<div class="card" data-a><div class="row"><b>${esc(r.p.name)}</b><button class="back" data-rm="${r.id}">✕</button></div>
+        <div class="qty" style="margin:8px 0 6px"><button data-m="${r.id}">−</button><input type="number" step="any" inputmode="decimal" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button><i class="un">${r.p.unit === 'kg' ? 'kg' : 'dona'}</i></div>
+        <div class="row"><span class="mut">${money(r.p.price)} so'm × ${fq(r.q)}</span><b>${money(r.p.price * r.q)} so'm</b></div></div>`).join('') || '<div class="mut" data-a>Hech narsa tanlanmagan</div>'}
+      <textarea id="cm" rows="2" placeholder="💬 Sabab / izoh (masalan: muddati o'tgan, sifatsiz)" data-a>${esc(S.ret.comment)}</textarea>
+      <div class="row" style="margin:14px 0" data-a><span>Jami</span><span class="sum"><span id="tot">0</span> so'm</span></div>
+      <button class="btn retbtn" id="send" data-a ${rows.length ? '' : 'disabled'}>↩️ Qaytarishni tasdiqqa yuborish</button>`);
+    countTo($('#tot'), cartSum(), { dur: 600 });
+    const chg = (id, v) => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; saveCart(); buzz(); draw(); };
+    $('#addMore').onclick = () => { buzz(); pickProducts(); }; $('#toPick').onclick = () => pickProducts();
+    $('#cm').oninput = e => { S.ret.comment = e.target.value; };
+    $$('[data-rm]').forEach(b => b.onclick = () => chg(b.dataset.rm, 0));
+    $$('[data-m]').forEach(b => b.onclick = () => chg(b.dataset.m, S.cart[b.dataset.m] - stepOf(S.products.find(p => p.id === b.dataset.m))));
+    $$('[data-p]').forEach(b => b.onclick = () => chg(b.dataset.p, S.cart[b.dataset.p] + stepOf(S.products.find(p => p.id === b.dataset.p))));
+    $$('[data-i]').forEach(i => i.onchange = () => chg(i.dataset.i, i.value));
+    $('#send').onclick = async () => {
+      const b = $('#send'); if (b.disabled) return;
+      b.disabled = true; const txt = b.textContent; b.textContent = '⏳ Yuborilmoqda…';
+      try {
+        let rid = LS.get('rreq_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('rreq_id', rid); }
+        const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty }));
+        const res = await api('/api/returns', { method: 'POST', retry: 2, timeout: 120000, json: { agent: S.ret.agent, client_name: S.ret.client, items, comment: S.ret.comment, req_id: rid } });
+        LS.set('rreq_id', null); S.cart = {}; saveCart(); S.ret = { agent: '', client: '', ptype: '', photos: [], comment: '' };
+        buzz('heavy'); confetti(); toast(res.duplicate ? 'Avval yuborilgan edi ✅' : `✅ Vozvrat R-${res.ret.id} tasdiqqa yuborildi`); retHome();
+      } catch (e) { toast(e.network ? e.message + ' — ma\'lumot saqlangan' : e.message); b.disabled = false; b.textContent = txt; }
+    };
+  };
+  draw();
+}
+
 /* ================================================================== admin */
 async function loadUsers() {
   const box = $('#usr'); if (!box) return;
   try {
     const { items, agents } = await api('/api/users');
     box.innerHTML = items.map(u => `<div class="urow" style="padding:8px 0;border-bottom:1px solid #F0F1F5"><div style="display:flex;gap:8px;align-items:center"><div style="flex:1;min-width:0"><b>${esc(u.name)}</b>${u.admin ? ' 👑' : ''}<div class="mut" style="font-size:12px">${u.username ? '@' + esc(u.username) + ' · ' : ''}${u.tg_id}</div></div>
-      <select data-u="${u.tg_id}" style="max-width:48%"><option value="">🚫 Ruxsat yo'q</option>${agents.map(g => `<option ${u.agent === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
+      <select data-u="${u.tg_id}" style="max-width:48%"><option value="">🚫 Ruxsat yo'q</option><option value="@sklad" ${u.agent === '@sklad' ? 'selected' : ''}>📦 Skladchi (vozvrat)</option>${agents.map(g => `<option ${u.agent === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span class="mut" style="flex:1;font-size:13px">📱 Ilova: ${u.login ? '<b style="color:var(--txt)">' + esc(u.login) + '</b>' : 'login berilmagan'}</span><button type="button" class="btn sec small" data-lg="${u.tg_id}">🔑 ${u.login ? 'Almashtirish' : 'Login berish'}</button></div>
       <div class="lgf hidden" data-lf="${u.tg_id}" style="margin-top:6px;display:grid;gap:6px"><input placeholder="Login (lotincha, masalan samandar)" value="${esc(u.login || '')}" data-ll autocomplete="off" autocapitalize="off"><input placeholder="Parol (kamida 6 belgi)" data-lp autocomplete="new-password">
       <div style="display:flex;gap:6px"><button type="button" class="btn small" data-ls="${u.tg_id}">Saqlash</button>${u.login ? `<button type="button" class="btn sec small" data-ld="${u.tg_id}">O'chirish</button>` : ''}</div></div></div>`).join('') || '<div class="mut">Hali hech kim kirmagan</div>';
-    $('#nag').innerHTML = '<option value="">Agentni tanlang</option>' + agents.map(g => `<option>${esc(g)}</option>`).join('');
+    $('#nag').innerHTML = '<option value="">Agentni tanlang</option><option value="@sklad">📦 Skladchi (vozvrat)</option>' + agents.map(g => `<option>${esc(g)}</option>`).join('');
     $('#nadd').onclick = async () => { const id = $('#nid').value.replace(/\D/g, ''), ag = $('#nag').value; if (!id || !ag) return toast('ID va agentni kiriting'); try { await api('/api/users/' + id + '/access', { method: 'PUT', json: { agent: ag } }); toast('Qo\'shildi'); loadUsers(); } catch (e) { toast(e.message); } };
     $$('[data-lg]', box).forEach(b => b.onclick = () => { const f = $(`[data-lf="${b.dataset.lg}"]`, box); f.classList.toggle('hidden'); if (!f.classList.contains('hidden')) { const p = $('[data-lp]', f); p.value = Math.random().toString(36).slice(2, 8); } });
     const saveLogin = async (id, login, password) => { try { await api('/api/users/' + id + '/login', { method: 'PUT', json: { login, password } }); toast(login ? `✅ Saqlandi. Agentga yuboring: ${login} / ${password}` : 'Login o\'chirildi'); loadUsers(); } catch (e) { toast(e.message); } };
@@ -656,7 +835,7 @@ function showLock(onOpen, mode = 'unlock', mandatory = false) {          // mode
   if (mandatory) { title.set = "O'zingizga 4 xonali kod qo'ying"; sub.set = 'Keyingi safar ilovaga shu kod bilan kirasiz'; }
   const draw = () => {
     const showPad = mode !== 'unlock' || LS.get('pinh');
-    L.innerHTML = `<div class="lk-logo">mc</div><div class="lk-brand">MEATCITY · ONLINE ZAKAS</div>
+    L.innerHTML = `<div class="lk-logo"><div class="lk-coin"><img src="/static/logo.png" alt="MeatCity"><img src="/static/logo.png" alt="" aria-hidden="true" class="bk"></div></div><div class="lk-brand">MEATCITY · AGENT</div>
       <div class="lk-hi">${title[mode]}</div><div class="lk-sub">${sub[mode]}</div>
       ${showPad ? `<div class="lk-dots">${[0, 1, 2, 3].map(i => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join('')}</div>` : '<div style="height:40px"></div>'}
       <div class="lk-keys">${showPad ? [1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => `<button type="button" data-k="${k}">${k}</button>`).join('') : ''}
@@ -762,7 +941,7 @@ setInterval(() => { if (S.me && S.me.allowed && !document.hidden) pollNotes(); }
 function loginView() {
   setDock(null); updateCartBar(false); setBack(null);
   const L = $('#lock');
-  L.innerHTML = `<div class="lk-logo">mc</div><div class="lk-brand">MEATCITY · ONLINE ZAKAS</div>
+  L.innerHTML = `<div class="lk-logo"><div class="lk-coin"><img src="/static/logo.png" alt="MeatCity"><img src="/static/logo.png" alt="" aria-hidden="true" class="bk"></div></div><div class="lk-brand">MEATCITY · AGENT</div>
     <div class="lk-hi">Ilovaga kirish</div><div class="lk-sub">Admin bergan login va parolni kiriting</div>
     <form id="lgForm" style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;margin-top:18px">
       <label class="mut" style="font-size:13px;font-weight:700">Login<input id="lgL" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" style="margin-top:4px;width:100%;box-sizing:border-box;height:52px;padding:0 14px;font-size:17px"></label>
@@ -814,7 +993,8 @@ async function start() {
         <div class="card" style="margin-top:14px"><b>🔒 Zakas bo'limi faqat savdo agentlari uchun</b><div class="mut" style="margin-top:6px">Ruxsat olish uchun ID raqamingizni adminga yuboring:</div><div style="font-size:24px;font-weight:800;margin-top:6px">${S.me.id}</div></div></div>`);
       return;
     }
-    api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
+    if (S.me.role !== 'sklad') api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
+    if (S.me.role === 'sklad') { useMode('ret'); const d = $('#dock [data-d="new"] span'); if (d) d.textContent = 'Vozvrat'; const h = $('#dock [data-d="home"] span'); if (h) h.textContent = 'Ro\'yxat'; $('#hello').textContent = '📦 Sklad · ' + S.me.name; }
     if (lockOn() && !unlocked) showLock(ok => { if (ok) { unlocked = true; home(); } }); else home();
     pollNotes();
   } catch (e) {

@@ -47,6 +47,7 @@ SD_PASSWORD = os.getenv("SD_PASSWORD", "")
 SD_WAREHOUSE = os.getenv("SD_WAREHOUSE", "").strip()        # ixtiyoriy: faqat shu sklad nomi
 SD_AGENTS = [x.strip() for x in os.getenv("SD_AGENTS", "Хусанов Самандар,Жабборов Самариддин,Усмонов Ғолибжон").split(",") if x.strip()]  # mijozlari olinadigan agentlar
 SD_INTERVAL = int(os.getenv("SD_INTERVAL", "600"))          # soniya
+SKLAD = "@sklad"                                            # access.agent qiymati: skladchi roli (vozvrat kiritadi)
 STATUSES = ["new", "collecting", "on_way", "delivered"]
 STATUS_TEXT = {
     "new": "🆕 Qabul qilindi",
@@ -83,6 +84,16 @@ CREATE TABLE IF NOT EXISTS app_logins(login TEXT PRIMARY KEY, pw TEXT, tg_id INT
 CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, kind TEXT, title TEXT, body TEXT, order_id INTEGER, created INTEGER, read INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(tg_id, id);
 CREATE TABLE IF NOT EXISTS access(tg_id INTEGER PRIMARY KEY, agent TEXT NOT NULL, added INTEGER);
+CREATE TABLE IF NOT EXISTS returns(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT, agent TEXT, ptype TEXT DEFAULT '',
+  client_id INTEGER DEFAULT 0, client_name TEXT, client_typed TEXT, items TEXT, total REAL, photos TEXT DEFAULT '[]',
+  comment TEXT DEFAULT '', status TEXT DEFAULT 'pending', reason TEXT DEFAULT '', approved_by TEXT DEFAULT '',
+  created INTEGER, updated INTEGER, approved_at INTEGER DEFAULT 0, printed_at INTEGER DEFAULT 0, req_id TEXT DEFAULT '');
+CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status, id);
+CREATE TABLE IF NOT EXISTS otkaz(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT, client_name TEXT, order_no TEXT,
+  photos TEXT DEFAULT '[]', comment TEXT DEFAULT '', created INTEGER, seen_at INTEGER DEFAULT 0, sent INTEGER DEFAULT 0, req_id TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS agent_prices(agent TEXT PRIMARY KEY, ptype TEXT, prices TEXT, updated INTEGER);
 """
 )
 for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
@@ -634,6 +645,9 @@ async def auth_mw(request: web.Request, handler):
         acc = db.execute("SELECT agent FROM access WHERE tg_id=?", (user["id"],)).fetchone()
         request["agent"] = acc["agent"] if acc else ""
         request["allowed"] = request["admin"] or bool(acc)
+        request["role"] = "admin" if request["admin"] else ("sklad" if request["agent"] == SKLAD else ("agent" if acc else ""))
+        if request["agent"] == SKLAD:              # skladchi: agent emas — mijoz bazasi va zakaslar unga yopiq
+            request["agent"] = ""
         # zakas guruhida va ilovada ko'rinadigan ism: agent bo'lsa — Sales Doctor'dagi agent nomi
         request["uname"] = request["agent"] or name
         if not request["allowed"] and request.path != "/api/me":
@@ -922,6 +936,16 @@ async def poll_bot():
             m = u.get("message") or {}
             text = (m.get("text") or "").split("@")[0].strip()
             chat = m.get("chat", {})
+            if text in ("/vozvrat", "/otkaz") and chat.get("type") != "private" and (m.get("from") or {}).get("id") in ADMIN_IDS:
+                pre = "ret" if text == "/vozvrat" else "otk"               # vozvrat / otkaz shu topikka tushadi
+                kv_set(pre + "_chat", str(chat["id"]))
+                kv_set(pre + "_topic", str(m.get("message_thread_id") or ""))
+                p = {"chat_id": chat["id"], "text": "✅ " + ("Vozvrat nakladnoylari" if pre == "ret" else "Otkaz zakaslar") + " endi shu topikka tushadi"}
+                if m.get("message_thread_id"):
+                    p["message_thread_id"] = m["message_thread_id"]
+                await tg("sendMessage", **p)
+                await tg("deleteMessage", chat_id=chat["id"], message_id=m["message_id"])
+                continue
             if text in ("/start", "/panel") and APP_LINK:
                 kb = {"inline_keyboard": [[{"text": "🥩 Online zakas'ni ochish", "url": APP_LINK}]]}
                 if chat.get("type") == "private":
@@ -969,7 +993,7 @@ async def h_me(request):
     u = db.execute("SELECT * FROM users WHERE tg_id=?", (request["uid"],)).fetchone()
     return web.json_response({
         "id": u["tg_id"], "name": request["uname"], "tg_name": u["name"], "region": u["region"] or "", "admin": request["admin"],
-        "allowed": request["allowed"], "agent": request["agent"],
+        "allowed": request["allowed"], "agent": request["agent"], "role": request["role"],
         "clients": db.execute("SELECT COUNT(*) c FROM clients").fetchone()["c"],
     })
 
@@ -983,6 +1007,11 @@ async def h_me_put(request):
 
 async def h_products(request):
     items = await get_products(force=request.query.get("force") == "1" and request["admin"])
+    ag = request.query.get("agent", "").strip()
+    if ag and request["role"] in ("admin", "sklad"):         # vozvrat: agentning narx turi bo'yicha narxlar
+        ptype, prices = agent_price_map(ag)
+        items = [{**p, "price": prices.get(p["id"], p["price"])} for p in items]
+        return web.json_response({"items": annotate(items), "ptype": ptype, "t": _cache["t"]})
     return web.json_response({"items": annotate(items), "t": _cache["t"], "stock_t": _stock["t"]})
 
 
@@ -1063,7 +1092,7 @@ async def h_users(request):
     rows = sorted(rows, key=lambda r: (r["agent"] is None, -(r["last_seen"] or 0)))[:300]
     agents = [r["agent"] for r in db.execute("SELECT agent FROM clients WHERE agent!='' GROUP BY agent ORDER BY COUNT(*) DESC").fetchall()]
     logins = {r["tg_id"]: r["login"] for r in db.execute("SELECT tg_id, login FROM app_logins").fetchall()}
-    return web.json_response({"items": [{**dict(r), "admin": r["tg_id"] in ADMIN_IDS, "login": logins.get(r["tg_id"], "")} for r in rows], "agents": agents})
+    return web.json_response({"items": [{**dict(r), "admin": r["tg_id"] in ADMIN_IDS, "login": logins.get(r["tg_id"], "")} for r in rows], "agents": agents, "sklad": SKLAD})
 
 
 async def h_user_access(request):
@@ -1128,6 +1157,8 @@ async def h_regions(request):
 
 
 async def h_clients(request):
+    if request["role"] == "sklad":
+        return web.json_response({"items": []})
     region = request.query.get("region", "").strip()
     if not request["admin"]:                      # agentga faqat o'z mijozlari (so'rovdagi filtr e'tiborga olinmaydi)
         region = request["agent"]
@@ -1248,6 +1279,8 @@ MAX_QTY = 100000
 
 
 async def h_order_create(request):
+    if request["role"] == "sklad":
+        return web.json_response({"error": "Skladchi zakas bera olmaydi"}, status=403)
     b = await request.json()
     req_id = re.sub(r"[^\w-]", "", str(b.get("req_id", "")))[:64]
     if req_id:   # internet uzilib qayta yuborilsa yoki ikki marta bosilsa — o'sha zakasni qaytaramiz, yangisini ochmaymiz
@@ -1316,6 +1349,593 @@ async def h_order_delete(request):
     return web.json_response({"ok": True})
 
 
+# ---------------------------------------------------------------- VOZVRAT (skladchi kiritadi -> Jarvis'da tasdiq -> guruh topigi)
+PHOTO_DIR = Path(DB_PATH).parent / "photos"
+PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+PHOTO_DDL = "CREATE TABLE IF NOT EXISTS oz_photos(pid TEXT PRIMARY KEY, data BYTEA, created TIMESTAMPTZ DEFAULT now())"
+RET_ST = {"pending": "⏳ Tasdiq kutilmoqda", "approved": "✅ Tasdiqlandi", "rejected": "❌ Rad etildi"}
+
+
+def ret_agents() -> list:
+    """Vozvrat uchun agentlar: mijoz bazasidagi agentlar (eng ko'p mijozi borlari birinchi)."""
+    rows = [r["agent"] for r in db.execute("SELECT agent FROM clients WHERE agent!='' GROUP BY agent ORDER BY COUNT(*) DESC").fetchall()]
+    for a in SD_AGENTS:                     # baza hali bo'sh bo'lsa ham SD_AGENTS dagilar chiqadi
+        if not any(norm(a) == norm(x) for x in rows):
+            rows.append(a)
+    return rows
+
+
+def agent_price_map(agent: str):
+    r = db.execute("SELECT ptype, prices FROM agent_prices WHERE agent=?", (agent,)).fetchone()
+    if not r:
+        return "", {}
+    try:
+        return r["ptype"] or "", {str(k): float(v) for k, v in json.loads(r["prices"] or "{}").items()}
+    except Exception:
+        return r["ptype"] or "", {}
+
+
+def _photo_norm(raw: bytes) -> bytes:
+    """Rasmni tekshiradi va JPEG (eng uzun tomoni 1600px) ga keltiradi — EXIF/ortiqcha ma'lumot olib tashlanadi."""
+    from PIL import Image, ImageOps
+    im = Image.open(io.BytesIO(raw))
+    im = ImageOps.exif_transpose(im).convert("RGB")
+    im.thumbnail((1600, 1600))
+    out = io.BytesIO()
+    im.save(out, "JPEG", quality=80, optimize=True)
+    return out.getvalue()
+
+
+async def photo_put(pid: str, data: bytes):
+    (PHOTO_DIR / f"{pid}.jpg").write_bytes(data)
+    if DATABASE_URL:                        # Render diski deployda tozalanadi — rasm Postgres'da alohida saqlanadi
+        try:
+            import asyncpg
+            c = await asyncpg.connect(DATABASE_URL, statement_cache_size=0, timeout=20)
+            try:
+                await c.execute(PHOTO_DDL)
+                await c.execute("INSERT INTO oz_photos(pid,data) VALUES($1,$2) ON CONFLICT(pid) DO NOTHING", pid, data)
+                await c.execute("DELETE FROM oz_photos WHERE created < now() - interval '120 days'")
+            finally:
+                await c.close()
+        except Exception as e:
+            log.warning("photo backup failed: %s", e)
+
+
+async def photo_get(pid: str):
+    if not re.fullmatch(r"[\w-]{6,64}", pid or ""):
+        return None
+    f = PHOTO_DIR / f"{pid}.jpg"
+    if f.exists():
+        return f.read_bytes()
+    if DATABASE_URL:
+        try:
+            import asyncpg
+            c = await asyncpg.connect(DATABASE_URL, statement_cache_size=0, timeout=20)
+            try:
+                row = await c.fetchrow("SELECT data FROM oz_photos WHERE pid=$1", pid)
+            finally:
+                await c.close()
+            if row:
+                f.write_bytes(bytes(row["data"]))
+                return bytes(row["data"])
+        except Exception as e:
+            log.warning("photo load failed: %s", e)
+    return None
+
+
+async def save_photos(raw_list, limit=6) -> list:
+    import base64
+    import secrets
+    photos = []
+    for x in [x for x in (raw_list or []) if isinstance(x, str)][:limit]:
+        try:
+            raw = base64.b64decode(x.split(",", 1)[-1], validate=False)
+            if len(raw) > 6 * 1024 * 1024:
+                raise ValueError
+            data = await asyncio.get_running_loop().run_in_executor(None, _photo_norm, raw)
+        except Exception:
+            raise ValueError("Rasm o'qilmadi. Qayta rasmga oling")
+        pid = secrets.token_urlsafe(12)
+        await photo_put(pid, data)
+        photos.append(pid)
+    return photos
+
+
+async def tg_album(chat, topic, files: list, caption: str) -> str:
+    """files: [(nom, bytes)] -> 1 ta bo'lsa sendPhoto, ko'p bo'lsa sendMediaGroup. Xato bo'lsa matn qaytaradi."""
+    if not BOT_TOKEN:
+        return "BOT_TOKEN o'rnatilmagan"
+    files = files[:10]
+    form = aiohttp.FormData()
+    form.add_field("chat_id", str(chat))
+    if topic:
+        form.add_field("message_thread_id", str(topic))
+    if len(files) == 1:
+        method = "sendPhoto"
+        form.add_field("caption", caption)
+        form.add_field("photo", files[0][1], filename=files[0][0], content_type="image/jpeg")
+    else:
+        method = "sendMediaGroup"
+        media = []
+        for i, (fn, data) in enumerate(files):
+            media.append({"type": "photo", "media": f"attach://f{i}", **({"caption": caption} if i == 0 else {})})
+            form.add_field(f"f{i}", data, filename=fn, content_type="image/jpeg")
+        form.add_field("media", json.dumps(media, ensure_ascii=False))
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as s:
+            async with s.post(f"https://api.telegram.org/bot{BOT_TOKEN}/{method}", data=form) as resp:
+                res = await resp.json()
+        if res.get("ok"):
+            return ""
+        log.warning("%s: %s", method, res)
+        return "Telegram: " + str(res.get("description", ""))[:150]
+    except Exception as e:
+        return f"Telegram: {e}"[:150]
+
+
+def row_ret(r) -> dict:
+    d = dict(r)
+    d["items"] = json.loads(d["items"] or "[]")
+    d["photos"] = json.loads(d["photos"] or "[]")
+    d["status_text"] = RET_ST.get(d["status"], d["status"])
+    return d
+
+
+def ret_items(raw: list, agent: str, catalog: dict, allow_price=False):
+    _, prices = agent_price_map(agent)
+    items, total = [], 0.0
+    for it in raw or []:
+        p = catalog.get(str(it.get("id")))
+        qty = _num(it.get("qty"))
+        if not p or not (0 < qty <= MAX_QTY):
+            continue
+        price = prices.get(p["id"], p["price"])
+        if allow_price and it.get("price") not in (None, ""):
+            pr = _num(it.get("price"))
+            if 0 <= pr <= 1e9:
+                price = pr
+        items.append({"id": p["id"], "name": p["name"], "price": price, "qty": qty, "unit": p["unit"]})
+        total += price * qty
+    return items, total
+
+
+async def h_ret_agents(request):
+    if request["role"] not in ("admin", "sklad"):
+        return web.json_response({"error": "Faqat skladchi uchun"}, status=403)
+    out = []
+    for a in ret_agents():
+        ptype, prices = agent_price_map(a)
+        out.append({"agent": a, "ptype": ptype, "n": len(prices)})
+    return web.json_response({"items": out})
+
+
+async def h_ret_create(request):
+    if request["role"] not in ("admin", "sklad"):
+        return web.json_response({"error": "Vozvratni faqat skladchi kiritadi"}, status=403)
+    b = await request.json()
+    req_id = re.sub(r"[^\w-]", "", str(b.get("req_id", "")))[:64]
+    if req_id:
+        dup = db.execute("SELECT * FROM returns WHERE tg_id=? AND req_id=?", (request["uid"], req_id)).fetchone()
+        if dup:
+            return web.json_response({"ok": True, "ret": row_ret(dup), "duplicate": True})
+    agent = str(b.get("agent", "")).strip()
+    if agent not in ret_agents():
+        return web.json_response({"error": "Agentni tanlang"}, status=400)
+    cname = re.sub(r"\s+", " ", str(b.get("client_name", ""))).strip()[:120]
+    if len(cname) < 2:
+        return web.json_response({"error": "Mijoz nomini yozing"}, status=400)
+    catalog = {p["id"]: p for p in annotate(await get_products())}
+    items, total = ret_items(b.get("items"), agent, catalog)
+    if not items:
+        return web.json_response({"error": "Qaytarilgan mahsulotlar yo'q yoki miqdor noto'g'ri"}, status=400)
+    try:
+        photos = await save_photos(b.get("photos"))        # vozvratda rasm ixtiyoriy
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    ptype, _ = agent_price_map(agent)
+    cur = db.execute(
+        "INSERT INTO returns(tg_id,user_name,agent,ptype,client_name,client_typed,items,total,photos,comment,created,updated,req_id) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (request["uid"], request["uname"], agent, ptype, cname, cname, json.dumps(items, ensure_ascii=False), total,
+         json.dumps(photos), str(b.get("comment", ""))[:300], now(), now(), req_id))
+    db.commit()
+    r = row_ret(db.execute("SELECT * FROM returns WHERE id=?", (cur.lastrowid,)).fetchone())
+    add_note([a for a in ADMIN_IDS if a != request["uid"]], "info", f"↩️ Vozvrat #{r['id']} tasdiq kutmoqda",
+             f"{cname} · {agent} · {money(total)} so'm")
+    return web.json_response({"ok": True, "ret": r})
+
+
+async def h_ret_list(request):
+    sql, args = "SELECT * FROM returns", []
+    if request["role"] == "sklad":
+        sql += " WHERE tg_id=?"
+        args.append(request["uid"])
+    elif request["role"] != "admin":              # agent: faqat o'z mijozlarining tasdiqlangan vozvratlari
+        sql += " WHERE agent=? AND status='approved'"
+        args.append(request["agent"])
+    rows = db.execute(sql + " ORDER BY id DESC LIMIT 150", args).fetchall()
+    return web.json_response({"items": [row_ret(r) for r in rows]})
+
+
+def ret_full(r: dict) -> dict:
+    cl = db.execute("SELECT ext_id, region, agent FROM clients WHERE id=?", (r.get("client_id") or 0,)).fetchone()
+    return {**r, "kind": "return", "ext_id": (cl["ext_id"] if cl else "") or "", "region": (cl["region"] if cl else "") or "",
+            "linked": bool(cl)}
+
+
+async def send_return(r: dict) -> str:
+    """Tasdiqlangan vozvrat: накладная + foto tasdiqlar -> vozvrat topigi. Xato bo'lsa matnini qaytaradi."""
+    chat, topic = kv_get("ret_chat") or "", kv_get("ret_topic") or ""
+    if not BOT_TOKEN:
+        return "BOT_TOKEN o'rnatilmagan"
+    if not chat:
+        return "Vozvrat topigi belgilanmagan"
+    from invoice import make_invoice
+    jpg = await asyncio.get_running_loop().run_in_executor(None, make_invoice, ret_full(r))
+    cap = f"↩️ ВОЗВРАТ № R-{r['id']} · {r['client_name']} · {r['agent']}"
+    files = [("vozvrat.jpg", jpg)]
+    for pid in r["photos"][:9]:
+        data = await photo_get(pid)
+        if data:
+            files.append((f"{pid}.jpg", data))
+    return await tg_album(chat, topic, files, cap)
+
+
+# --- Jarvis tomoni (tasdiqlash)
+async def h_j_returns(request):
+    _jarvis_ok(request)
+    st = request.query.get("status", "pending")
+    sql, args = "SELECT * FROM returns", []
+    if st in RET_ST:
+        sql += " WHERE status=?"
+        args.append(st)
+    rows = db.execute(sql + " ORDER BY id DESC LIMIT 200", args).fetchall()
+    out = [ret_full(row_ret(r)) for r in rows]
+    cnt = {r["status"]: r["c"] for r in db.execute("SELECT status, COUNT(*) c FROM returns GROUP BY status").fetchall()}
+    return web.json_response({"items": out, "counts": cnt, "topic": bool(kv_get("ret_chat")), "agents": ret_agents()})
+
+
+async def h_j_photo(request):
+    _jarvis_ok(request)
+    data = await photo_get(request.match_info["pid"])
+    if not data:
+        raise web.HTTPNotFound()
+    return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
+
+async def h_j_clients(request):
+    _jarvis_ok(request)
+    """Skladchi yozgan nom aniq bo'lmaydi: so'zlardan BIRORTASI mos kelsa ham chiqadi, eng o'xshashi birinchi."""
+    sql, args = "SELECT id,ext_id,name,phone,region,address,agent,search FROM clients WHERE 1=1", []
+    if request.query.get("agent"):
+        sql += " AND agent=?"
+        args.append(request.query["agent"])
+    q = request.query.get("q", "").strip()
+    words = [w for w in re.split(r"[\s,.\-]+", q) if len(w) >= 2 and w.lower() not in ("aka", "opa", "dukon", "dukoni", "do'kon", "magazin", "магазин", "ака", "дукон")]
+    if words:
+        sql += " AND (" + " OR ".join(["search LIKE ? OR search LIKE ?"] * len(words)) + ")"
+        for w in words:
+            args += [f"%{w.lower()}%", f"%{translit(w)}%"]
+    rows = [dict(r) for r in db.execute(sql + " LIMIT 400", args).fetchall()]
+    if q:
+        tq = translit(q)
+        for r in rows:
+            hit = sum(1 for w in words if w.lower() in r["search"] or translit(w) in r["search"])
+            r["_s"] = hit * 2 + SequenceMatcher(None, tq, translit(r["name"])).ratio()
+        rows.sort(key=lambda r: -r["_s"])
+    else:
+        rows.sort(key=lambda r: r["name"])
+    return web.json_response({"items": [{k: v for k, v in r.items() if k not in ("search", "_s")} for r in rows[:40]]})
+
+
+async def h_j_products(request):
+    _jarvis_ok(request)
+    ptype, prices = agent_price_map(request.query.get("agent", ""))
+    items = [{"id": p["id"], "name": p["name"], "price": prices.get(p["id"], p["price"]), "unit": p["unit"]} for p in annotate(await get_products())]
+    return web.json_response({"items": items, "ptype": ptype})
+
+
+async def _ret_apply(rid: int, b: dict):
+    """Jarvis'dagi o'zgartirishlar: agent, mijoz (bazadan yoki matn), mahsulotlar (miqdor/narx), izoh."""
+    r = db.execute("SELECT * FROM returns WHERE id=?", (rid,)).fetchone()
+    if not r:
+        raise web.HTTPNotFound(text=json.dumps({"error": "Vozvrat topilmadi"}), content_type="application/json")
+    r = row_ret(r)
+    if r["status"] == "approved":
+        raise web.HTTPBadRequest(text=json.dumps({"error": "Tasdiqlangan vozvratni o'zgartirib bo'lmaydi"}), content_type="application/json")
+    agent = str(b.get("agent") or r["agent"]).strip()
+    if agent not in ret_agents():
+        raise web.HTTPBadRequest(text=json.dumps({"error": "Agent noto'g'ri"}), content_type="application/json")
+    cid, cname = r["client_id"] or 0, r["client_name"]
+    if "client_id" in b:
+        cid = int(b.get("client_id") or 0)
+        if cid:
+            cl = db.execute("SELECT name FROM clients WHERE id=?", (cid,)).fetchone()
+            if not cl:
+                raise web.HTTPBadRequest(text=json.dumps({"error": "Mijoz bazada topilmadi"}), content_type="application/json")
+            cname = cl["name"]
+    if b.get("client_name") and not cid:
+        cname = str(b["client_name"]).strip()[:120]
+    items, total = r["items"], r["total"]
+    if "items" in b:
+        catalog = {p["id"]: p for p in annotate(await get_products())}
+        items, total = ret_items(b["items"], agent, catalog, allow_price=True)
+        if not items:
+            raise web.HTTPBadRequest(text=json.dumps({"error": "Kamida bitta mahsulot qolishi kerak"}), content_type="application/json")
+    ptype, _ = agent_price_map(agent)
+    db.execute("UPDATE returns SET agent=?,ptype=?,client_id=?,client_name=?,items=?,total=?,comment=?,updated=? WHERE id=?",
+               (agent, ptype, cid, cname, json.dumps(items, ensure_ascii=False), total, str(b.get("comment", r["comment"]))[:300], now(), rid))
+    db.commit()
+    return row_ret(db.execute("SELECT * FROM returns WHERE id=?", (rid,)).fetchone())
+
+
+async def h_j_ret_save(request):
+    _jarvis_ok(request)
+    r = await _ret_apply(int(request.match_info["id"]), await request.json())
+    return web.json_response({"ok": True, "ret": ret_full(r)})
+
+
+async def h_j_ret_approve(request):
+    _jarvis_ok(request)
+    rid = int(request.match_info["id"])
+    b = await request.json() if request.can_read_body else {}
+    if not kv_get("ret_chat"):
+        return web.json_response({"error": "Avval vozvrat topigini belgilang: guruhdagi kerakli topikka /vozvrat deb yozing"}, status=400)
+    r = await _ret_apply(rid, b or {})
+    if r["status"] == "approved":
+        return web.json_response({"ok": True, "ret": ret_full(r)})
+    if not r["client_id"] and not b.get("force"):
+        return web.json_response({"error": "Mijoz bazadan tanlanmagan. Agent bazasidan mijozni tanlang (yoki 'baribir tasdiqlash')", "code": "noclient"}, status=400)
+    who = str(b.get("by") or "Admin")[:60]
+    db.execute("UPDATE returns SET status='approved', approved_at=?, approved_by=?, updated=? WHERE id=?", (now(), who, now(), rid))
+    db.commit()
+    r = row_ret(db.execute("SELECT * FROM returns WHERE id=?", (rid,)).fetchone())
+    err = await send_return(r)
+    agent_users = [x["tg_id"] for x in db.execute("SELECT tg_id FROM access WHERE agent=?", (r["agent"],)).fetchall()]
+    add_note([r["tg_id"]], "info", f"✅ Vozvrat #{rid} tasdiqlandi", f"{r['client_name']} · {money(r['total'])} so'm")
+    add_note(agent_users, "info", f"↩️ Mijozingizdan vozvrat #{rid}", f"{r['client_name']} · {money(r['total'])} so'm")
+    return web.json_response({"ok": True, "ret": ret_full(r), "warn": err})
+
+
+async def h_j_ret_reject(request):
+    _jarvis_ok(request)
+    rid = int(request.match_info["id"])
+    reason = str((await request.json()).get("reason", "")).strip()[:200]
+    r = db.execute("SELECT * FROM returns WHERE id=?", (rid,)).fetchone()
+    if not r or r["status"] == "approved":
+        return web.json_response({"error": "Rad etib bo'lmaydi"}, status=400)
+    db.execute("UPDATE returns SET status='rejected', reason=?, updated=? WHERE id=?", (reason, now(), rid))
+    db.commit()
+    add_note([r["tg_id"]], "info", f"❌ Vozvrat #{rid} rad etildi", reason or r["client_name"])
+    return web.json_response({"ok": True})
+
+
+async def h_j_ret_resend(request):
+    _jarvis_ok(request)
+    r = db.execute("SELECT * FROM returns WHERE id=? AND status='approved'", (int(request.match_info["id"]),)).fetchone()
+    if not r:
+        return web.json_response({"error": "Tasdiqlangan vozvrat topilmadi"}, status=400)
+    err = await send_return(row_ret(r))
+    return web.json_response({"ok": not err, "error": err})
+
+
+async def h_j_ret_invoice(request):
+    _jarvis_ok(request)
+    r = db.execute("SELECT * FROM returns WHERE id=?", (int(request.match_info["id"]),)).fetchone()
+    if not r:
+        raise web.HTTPNotFound()
+    from invoice import make_invoice
+    jpg = await asyncio.get_running_loop().run_in_executor(None, make_invoice, ret_full(row_ret(r)))
+    return web.Response(body=jpg, content_type="image/jpeg")
+
+
+async def h_j_ret_printed(request):
+    _jarvis_ok(request)
+    ids = [int(x) for x in (await request.json()).get("ids", [])][:300]
+    db.executemany("UPDATE returns SET printed_at=? WHERE id=?", [(now(), i) for i in ids])
+    db.commit()
+    return web.json_response({"ok": True})
+
+
+async def h_j_settings(request):
+    _jarvis_ok(request)
+    if request.method == "POST":
+        b = await request.json()
+        pre = "otk" if b.get("which") == "otk" else "ret"
+        if b.get("clear"):
+            kv_set(pre + "_chat", "")
+            kv_set(pre + "_topic", "")
+        elif b.get("test"):
+            if not kv_get(pre + "_chat"):
+                return web.json_response({"error": "Topik belgilanmagan"}, status=400)
+            p = {"chat_id": kv_get(pre + "_chat"), "text": "✅ Sinov: " + ("otkaz zakaslar" if pre == "otk" else "vozvrat nakladnoylari") + " shu topikka tushadi"}
+            if kv_get(pre + "_topic"):
+                p["message_thread_id"] = int(kv_get(pre + "_topic"))
+            res = await tg("sendMessage", **p)
+            if not (res or {}).get("ok"):
+                return web.json_response({"error": str((res or {}).get("description", "Telegram javob bermadi"))}, status=400)
+    return web.json_response({"ret_chat": kv_get("ret_chat") or "", "ret_topic": kv_get("ret_topic") or "",
+                              "otk_chat": kv_get("otk_chat") or "", "otk_topic": kv_get("otk_topic") or "", "order_topic": TOPIC_ID})
+
+
+def read_price_xlsx(data: bytes) -> list:
+    """Narxlar Excel: 'Наименование/Товар' va 'Цена/Narx' ustunlari -> [(nom, narx)]."""
+    import openpyxl
+    ws = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True).active
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    for i, r in enumerate(rows[:20]):
+        low = [str(c or "").strip().lower() for c in r]
+        cn = next((j for j, c in enumerate(low) if any(k in c for k in ("наимен", "товар", "продукт", "mahsulot", "nom", "name"))), None)
+        cp = next((j for j, c in enumerate(low) if any(k in c for k in ("цена", "narx", "price", "стоим"))), None)
+        if cn is not None and cp is not None:
+            out = []
+            for rr in rows[i + 1:]:
+                if cn < len(rr) and cp < len(rr) and rr[cn]:
+                    v = rr[cp] if isinstance(rr[cp], (int, float)) else _num(rr[cp])
+                    if v:
+                        out.append((str(rr[cn]), float(v)))
+            return out
+    out = []                                   # sarlavhasiz: birinchi matn + oxirgi son
+    for r in rows:
+        txt = [c for c in r if isinstance(c, str) and c.strip()]
+        nums = [c for c in r if isinstance(c, (int, float))]
+        if txt and nums:
+            out.append((txt[0], float(nums[-1])))
+    return out
+
+
+def match_prices(rows: list, products: list):
+    """[(nom, narx)] -> {mahsulot_id: narx}. Nomdagi raqamlar (0,5 kg) bir xil bo'lishi shart."""
+    idx = [(p["id"],) + pkey(p["name"]) for p in products]
+    res, miss = {}, []
+    for name, price in rows:
+        k, nums = pkey(name)
+        best, bid = 0.0, None
+        for pid, k2, n2 in idx:
+            if n2 != nums:
+                continue
+            r = 1.0 if k == k2 else SequenceMatcher(None, k, k2).ratio()
+            if r > best:
+                best, bid = r, pid
+        if bid and best >= 0.88:
+            res[bid] = price
+        else:
+            miss.append(name)
+    return res, miss
+
+
+async def h_j_agents(request):
+    _jarvis_ok(request)
+    out = []
+    for a in ret_agents():
+        r = db.execute("SELECT ptype, prices, updated FROM agent_prices WHERE agent=?", (a,)).fetchone()
+        out.append({"agent": a, "ptype": (r["ptype"] if r else "") or "", "n": len(json.loads(r["prices"] or "{}")) if r else 0,
+                    "updated": r["updated"] if r else 0})
+    return web.json_response({"items": out})
+
+
+async def h_j_agent_prices(request):
+    """Agentga narx turi biriktirish. JSON: {agent, ptype, items:[{name|id, price}]} yoki xlsx (?agent=&ptype=)."""
+    _jarvis_ok(request)
+    products = annotate(await get_products())
+    if request.content_type == "application/json":
+        b = await request.json()
+        agent, ptype = str(b.get("agent", "")).strip(), str(b.get("ptype", "")).strip()[:60]
+        ids = {p["id"] for p in products}
+        by_id = {str(x["id"]): _num(x.get("price")) for x in b.get("items", []) if str(x.get("id", "")) in ids}
+        prices, miss = match_prices([(x.get("name", ""), _num(x.get("price"))) for x in b.get("items", []) if str(x.get("id", "")) not in ids and x.get("name")], products)
+        prices.update(by_id)
+    else:
+        agent, ptype = request.query.get("agent", "").strip(), request.query.get("ptype", "").strip()[:60]
+        try:
+            rows = read_price_xlsx(await request.read())
+        except Exception as e:
+            return web.json_response({"error": f"Excel o'qilmadi: {e}"}, status=400)
+        prices, miss = match_prices(rows, products)
+    if agent not in ret_agents():
+        return web.json_response({"error": "Agent topilmadi"}, status=400)
+    if not prices and not ptype:
+        db.execute("DELETE FROM agent_prices WHERE agent=?", (agent,))
+    else:
+        db.execute("INSERT OR REPLACE INTO agent_prices(agent,ptype,prices,updated) VALUES(?,?,?,?)",
+                   (agent, ptype, json.dumps(prices), now()))
+    db.commit()
+    return web.json_response({"ok": True, "matched": len(prices), "missed": len(miss), "missed_names": miss[:20]})
+
+
+# ---------------------------------------------------------------- OTKAZ ZAKAS (skladchi: mijoz + zakas raqami + mahsulot rasmi)
+def row_otk(r) -> dict:
+    d = dict(r)
+    d["photos"] = json.loads(d["photos"] or "[]")
+    return d
+
+
+async def send_otkaz(o: dict) -> str:
+    chat, topic = kv_get("otk_chat") or "", kv_get("otk_topic") or ""
+    if not chat:
+        return "Otkaz topigi belgilanmagan"
+    t = datetime.utcfromtimestamp(o["created"]) + timedelta(hours=5)
+    cap = (f"🚫 ОТКАЗ · Zakas № {o['order_no']}\n🏪 {o['client_name']}\n📦 {o['user_name']} · {t:%d.%m.%Y %H:%M}"
+           + (f"\n💬 {o['comment']}" if o.get("comment") else ""))
+    files = []
+    for pid in o["photos"]:
+        data = await photo_get(pid)
+        if data:
+            files.append((f"{pid}.jpg", data))
+    if not files:
+        return "Rasm topilmadi"
+    err = await tg_album(chat, topic, files, cap)
+    if not err:
+        db.execute("UPDATE otkaz SET sent=? WHERE id=?", (now(), o["id"]))
+        db.commit()
+    return err
+
+
+async def h_otk_create(request):
+    if request["role"] not in ("admin", "sklad"):
+        return web.json_response({"error": "Otkazni faqat skladchi kiritadi"}, status=403)
+    b = await request.json()
+    req_id = re.sub(r"[^\w-]", "", str(b.get("req_id", "")))[:64]
+    if req_id:
+        dup = db.execute("SELECT * FROM otkaz WHERE tg_id=? AND req_id=?", (request["uid"], req_id)).fetchone()
+        if dup:
+            return web.json_response({"ok": True, "otkaz": row_otk(dup), "duplicate": True})
+    cname = re.sub(r"\s+", " ", str(b.get("client_name", ""))).strip()[:120]
+    ono = re.sub(r"\s+", " ", str(b.get("order_no", ""))).strip()[:40]
+    if len(cname) < 2:
+        return web.json_response({"error": "Mijoz nomini yozing"}, status=400)
+    if not ono:
+        return web.json_response({"error": "Zakas raqamini yozing"}, status=400)
+    if not b.get("photos"):
+        return web.json_response({"error": "Mahsulotni rasmga oling (kamida 1 ta)"}, status=400)
+    try:
+        photos = await save_photos(b.get("photos"), limit=10)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    cur = db.execute("INSERT INTO otkaz(tg_id,user_name,client_name,order_no,photos,comment,created,req_id) VALUES(?,?,?,?,?,?,?,?)",
+                     (request["uid"], request["uname"], cname, ono, json.dumps(photos), str(b.get("comment", ""))[:300], now(), req_id))
+    db.commit()
+    o = row_otk(db.execute("SELECT * FROM otkaz WHERE id=?", (cur.lastrowid,)).fetchone())
+    err = await send_otkaz(o)
+    add_note([a for a in ADMIN_IDS if a != request["uid"]], "info", f"🚫 Otkaz · zakas № {ono}", f"{cname} · {len(photos)} ta rasm")
+    o = row_otk(db.execute("SELECT * FROM otkaz WHERE id=?", (o["id"],)).fetchone())
+    return web.json_response({"ok": True, "otkaz": o, "warn": err})
+
+
+async def h_otk_list(request):
+    if request["role"] not in ("admin", "sklad"):
+        return web.json_response({"items": []})
+    sql, args = "SELECT * FROM otkaz", []
+    if request["role"] == "sklad":
+        sql += " WHERE tg_id=?"
+        args.append(request["uid"])
+    return web.json_response({"items": [row_otk(r) for r in db.execute(sql + " ORDER BY id DESC LIMIT 150", args).fetchall()]})
+
+
+async def h_j_otkaz(request):
+    _jarvis_ok(request)
+    rows = db.execute("SELECT * FROM otkaz ORDER BY id DESC LIMIT 200").fetchall()
+    new = db.execute("SELECT COUNT(*) c FROM otkaz WHERE seen_at=0").fetchone()["c"]
+    return web.json_response({"items": [row_otk(r) for r in rows], "new": new, "topic": bool(kv_get("otk_chat"))})
+
+
+async def h_j_otk_seen(request):
+    _jarvis_ok(request)
+    db.execute("UPDATE otkaz SET seen_at=? WHERE id=?", (now(), int(request.match_info["id"])))
+    db.commit()
+    return web.json_response({"ok": True})
+
+
+async def h_j_otk_resend(request):
+    _jarvis_ok(request)
+    r = db.execute("SELECT * FROM otkaz WHERE id=?", (int(request.match_info["id"]),)).fetchone()
+    if not r:
+        raise web.HTTPNotFound()
+    err = await send_otkaz(row_otk(r))
+    return web.json_response({"ok": not err, "error": err})
+
+
 BOOT_V = str(int(time.time()))
 
 
@@ -1381,6 +2001,29 @@ def make_app():
         web.get("/jarvis/invoice/{id}.jpg", h_jarvis_invoice),
         web.post("/jarvis/printed", h_jarvis_printed),
         web.get("/api/users", h_users),
+        web.get("/api/ret/agents", h_ret_agents),
+        web.get("/api/returns", h_ret_list),
+        web.get("/api/otkaz", h_otk_list),
+        web.post("/api/otkaz", h_otk_create),
+        web.get("/jarvis/otkaz", h_j_otkaz),
+        web.post("/jarvis/otkaz/{id}/seen", h_j_otk_seen),
+        web.post("/jarvis/otkaz/{id}/resend", h_j_otk_resend),
+        web.post("/api/returns", h_ret_create),
+        web.get("/jarvis/returns", h_j_returns),
+        web.get("/jarvis/return_photo/{pid}.jpg", h_j_photo),
+        web.get("/jarvis/photo/{pid}.jpg", h_j_photo),
+        web.get("/jarvis/clients", h_j_clients),
+        web.get("/jarvis/products", h_j_products),
+        web.post("/jarvis/returns/{id}", h_j_ret_save),
+        web.post("/jarvis/returns/{id}/approve", h_j_ret_approve),
+        web.post("/jarvis/returns/{id}/reject", h_j_ret_reject),
+        web.post("/jarvis/returns/{id}/resend", h_j_ret_resend),
+        web.get("/jarvis/return_invoice/{id}.jpg", h_j_ret_invoice),
+        web.post("/jarvis/return_printed", h_j_ret_printed),
+        web.get("/jarvis/settings", h_j_settings),
+        web.post("/jarvis/settings", h_j_settings),
+        web.get("/jarvis/agents", h_j_agents),
+        web.post("/jarvis/agent_prices", h_j_agent_prices),
         web.get("/api/notes", h_notes),
         web.post("/app/login", h_app_login),
         web.post("/api/app/logout", h_app_logout),
