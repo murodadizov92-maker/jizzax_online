@@ -208,19 +208,32 @@ function createScene(canvas, intro) {
 
 /* ================================================================== kirish (intro) */
 let banner = null, introScene = null;
-$('#introTitle').innerHTML = [...'MeatCity'].map((c, i) => `<span style="--i:${i}">${c}</span>`).join('');
-try { introScene = window.createIntro ? createIntro($('#introCanvas')) : createScene($('#introCanvas'), true); } catch (e) { introScene = null; }
+// ochilish: eski kolbasa animatsiyasi o'rniga — kod/barmoq izidan keyin brend videosi (intro.mp4, ovozsiz)
 try { banner = window.createBanner ? createBanner($('#bannerCanvas'), () => S.products) : null; } catch (e) { banner = null; }
 window.__bannerAdd = p => { S.cart[p.id] = (S.cart[p.id] || 0) + 1; saveCart(); toast('Savatga qo\'shildi'); };
-async function playIntro() {
-  await sleep(REDUCE ? 200 : 3600);
-  const el = $('#intro');
-  if (REDUCE) { el.remove(); document.body.classList.remove('booting'); return; }
-  document.body.classList.remove('booting');                                  // ilova kontenti chiqa boshlaydi
-  const a = el.animate([{ clipPath: 'circle(150% at 50% 62%)' }, { clipPath: 'circle(0% at 50% 62%)' }], { duration: 1050, easing: 'cubic-bezier(.75,0,.2,1)', fill: 'forwards' });
-  a.onfinish = () => { el.remove(); introScene && introScene.stop(); };
+async function playIntro() {                     // ilova yuklanguncha qisqa och fon, keyin darrov kod oynasi
+  await sleep(250);
+  const el = $('#intro'); document.body.classList.remove('booting');
+  const a = el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: 'forwards' });
+  a.onfinish = () => el.remove();
 }
 playIntro();
+const VID = document.createElement('video');      // oldindan yuklab qo'yiladi — kod terilgach kutmasdan chiqadi
+Object.assign(VID, { src: '/static/intro.mp4', muted: true, playsInline: true, preload: 'auto' });
+VID.setAttribute('muted', ''); VID.setAttribute('playsinline', ''); VID.setAttribute('webkit-playsinline', '');
+let vidShown = false;
+function playVid() {                               // to'liq ekran brend videosi (3 s), bosilsa o'tib ketadi; har ochilishda bir marta
+  if (vidShown || REDUCE) return Promise.resolve();
+  vidShown = true;
+  return new Promise(res => {
+    const box = document.createElement('div'); box.id = 'vintro'; box.appendChild(VID); document.body.appendChild(box);
+    let done = false;
+    const end = () => { if (done) return; done = true; const a = box.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, fill: 'forwards' }); a.onfinish = () => { box.remove(); try { VID.pause(); } catch (e) {} }; res(); };
+    VID.onended = end; VID.onerror = end; box.onclick = end;
+    setTimeout(end, 5000);                         // video ochilmasa ham ilova to'xtab qolmasin
+    try { VID.currentTime = 0; const p = VID.play(); if (p && p.catch) p.catch(end); } catch (e) { end(); }
+  });
+}
 
 /* ================================================================== holat */
 const S = { notes: {}, me: null, products: [], cat: 'Hammasi', q: '', cart: JSON.parse(localStorage.getItem('cart') || '{}'), client: null, region: '', tab: 'all', timer: null, stats: { n: 0, sum: 0, way: 0 }, mode: 'order', prodAgent: '', runit: {}, ret: { agent: '', client: '', ptype: '', photos: [], comment: '' } };
@@ -875,11 +888,12 @@ function showLock(onOpen, mode = 'unlock', mandatory = false) {          // mode
 
 async function profileView() {
   clearTimer(); setBack(home); updateCartBar(false); setDock('profile'); banner && banner.setProgress(null);
-  const me = S.me, big = document.body.classList.contains('big');
+  const me = S.me, big = document.body.classList.contains('big'), SK = me.role === 'sklad';
   render(`
     <div class="card pf-head" data-a><div class="pf-ava">${esc(initials(me.name))}</div><div class="pf-name">${esc(me.name)}</div>
-      <div class="mut">${me.admin ? 'Admin' : 'Savdo agenti'} · MeatCity Jizzax</div>
-      <div class="pf-stats"><div><b id="pfC">…</b><small>Mijoz</small></div><div><b id="pfT">…</b><small>Bugun zakas</small></div><div><b id="pfW">…</b><small>Hafta zakas</small></div></div></div>
+      <div class="mut">${SK ? '📦 Skladchi' : me.admin ? 'Admin' : 'Savdo agenti' + (me.agent ? ' · ' + esc(me.agent) : '')} · MeatCity Jizzax</div>
+      <div class="pf-stats">${SK ? `<div><b id="pfT">…</b><small>Bugun vozvrat</small></div><div><b id="pfW">…</b><small>Tasdiq kutmoqda</small></div><div><b id="pfC">…</b><small>Bugun otkaz</small></div>`
+        : `<div><b id="pfC">…</b><small>Mijoz</small></div><div><b id="pfT">…</b><small>Bugun zakas</small></div><div><b id="pfW">…</b><small>Hafta zakas</small></div>`}</div></div>
     <div class="sec-h" data-a>Kirish va xavfsizlik</div>
     <div class="card pf-list" data-a>
       <button type="button" class="pf-row" id="pfBio"><span class="pf-ic">${svg('finger')}</span><span class="t">Barmoq izi bilan kirish<small>Ilova ochilganda otpechatka so'raladi</small></span><span class="sw ${LS.get('bio') === '1' ? 'on' : ''}"></span></button>
@@ -888,7 +902,7 @@ async function profileView() {
     <div class="sec-h" data-a>Ko'rinish</div>
     <div class="card pf-list" data-a>
       <button type="button" class="pf-row" id="pfBig"><span class="pf-ic">${svg('text')}</span><span class="t">Katta yozuv<small>Yoshi kattalar uchun qulay</small></span><span class="sw ${big ? 'on' : ''}"></span></button>
-      <button type="button" class="pf-row" id="pfOrders"><span class="pf-ic">${svg('list')}</span><span class="t">Mening zakaslarim</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>
+      <button type="button" class="pf-row" id="pfOrders"><span class="pf-ic">${svg('list')}</span><span class="t">${SK ? 'Vozvrat va otkazlarim' : 'Mening zakaslarim'}</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>
       ${me.admin ? `<button type="button" class="pf-row" id="pfAdmin"><span class="pf-ic">${svg('gear')}</span><span class="t">Admin sozlamalari</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>` : ''}
     </div>
     <button type="button" class="pf-out" id="pfOut" data-a><span style="width:20px;height:20px;display:flex">${svg('logout')}</span> Profildan chiqish</button>
@@ -910,10 +924,20 @@ async function profileView() {
   };
   $('#pfOut').onclick = async () => {
     if (!(await ask('Profildan chiqasizmi?' + (lockOn() ? '' : "\n(Qayta kirishni himoyalash uchun PIN yoki barmoq izini yoqing)")))) return;
-    if (lockOn()) { setDock(null); showLock(ok => ok && home()); }
+    if (lockOn()) { setDock(null); vidShown = false; showLock(ok => ok && playVid().then(home)); }
     else if (APP) { try { await api('/api/app/logout', { method: 'POST' }); } catch (e) {} tokenSet(''); loginView(); }
     else if (tg && tg.close) tg.close(); else home();
   };
+  if (SK) {                                          // skladchi: o'z ko'rsatkichlari
+    try {
+      const [r, o] = await Promise.all([api('/api/returns'), api('/api/otkaz')]);
+      const d0 = new Date(); d0.setHours(0, 0, 0, 0); const t0 = d0.getTime() / 1000;
+      $('#pfT').textContent = r.items.filter(x => x.created >= t0).length;
+      $('#pfW').textContent = r.items.filter(x => x.status === 'pending').length;
+      $('#pfC').textContent = o.items.filter(x => x.created >= t0).length;
+    } catch (e) {}
+    return;
+  }
   try {
     const [{ items }, regs] = await Promise.all([api('/api/orders?scope=mine'), api('/api/regions').catch(() => ({ items: [] }))]);
     const d0 = new Date(); d0.setHours(0, 0, 0, 0); const w0 = d0.getTime() - 6 * 864e5;
@@ -1001,7 +1025,7 @@ async function start() {
     }
     if (S.me.role !== 'sklad') api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
     if (S.me.role === 'sklad') { useMode('ret'); const d = $('#dock [data-d="new"] span'); if (d) d.textContent = 'Vozvrat'; const h = $('#dock [data-d="home"] span'); if (h) h.textContent = 'Ro\'yxat'; $('#hello').textContent = '📦 Sklad · ' + S.me.name; }
-    if (lockOn() && !unlocked) showLock(ok => { if (ok) { unlocked = true; home(); } }); else home();
+    if (lockOn() && !unlocked) showLock(ok => { if (ok) { unlocked = true; playVid().then(home); } }); else playVid().then(home);
     pollNotes();
   } catch (e) {
     render(`<div class="card" data-a>Kirish xatosi: ${esc(e.message)}<div class="mut" style="margin-top:6px">Ilovani Telegram ichidan oching.</div></div>`);
