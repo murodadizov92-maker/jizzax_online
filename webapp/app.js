@@ -313,11 +313,22 @@ async function home() {
       <div class="stat"><b id="s3">0</b><small>Yo'lda</small></div>
     </div>
     <button class="btn" id="newOrd" data-a>➕ Yangi zakas</button>
+    ${S.me.role === 'agent' ? `<div class="aq" data-a>
+      <button data-v="stock"><i>📦</i><b>Ombor</b><small>Bor mahsulotlar</small></button>
+      <button data-v="bal"><i>💰</i><b>Balanslar</b><small>Mijoz qarzlari</small></button>
+      <button data-v="stats"><i>📊</i><b>Savdom</b><small>Kun · oy</small></button></div>
+      <div class="remind" id="remBox" data-a hidden></div>` : ''}
     <div class="tabs" data-a ${S.me.admin ? '' : 'style="display:none"'}><i class="pill"></i><div class="tab ${S.tab === 'all' ? 'on' : ''}" data-t="all">Hamma zakaslar</div><div class="tab ${S.tab === 'mine' ? 'on' : ''}" data-t="mine">Mening zakaslarim</div></div>
     <div id="list"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>`);
   ['s1', 's2', 's3'].forEach((id, i) => { const el = $('#' + id); const v = [S.stats.n, S.stats.sum, S.stats.way][i]; el.dataset.v = 0; countTo(el, v, { dur: 900 }); });
   setTimeout(paintTabsPill, 30);
   $('#newOrd').onclick = newOrder;
+  $$('.aq [data-v]').forEach(b => b.onclick = () => { buzz(); ({ stock: stockView, bal: balView, stats: statsView })[b.dataset.v](); });
+  if (S.me.role === 'agent') api('/api/agent/stats').then(r => {        // eslatma: o'tgan oyga nisbatan sotilmayotganlar
+    const n0 = r.remind.filter(x => x.kind === 'none').length, n1 = r.remind.length - n0, b = $('#remBox'); if (!b || !r.remind.length) return;
+    b.hidden = false; b.innerHTML = `<b>⚠️ O'tgan oyga nisbatan</b><span>${n0 ? n0 + " ta mahsulot bu oy umuman sotilmadi" : ''}${n0 && n1 ? ' · ' : ''}${n1 ? n1 + ' ta kam sotilyapti' : ''}</span><em>Ko'rish →</em>`;
+    b.onclick = () => statsView('remind');
+  }).catch(() => {});
   $$('.tab').forEach(t => t.onclick = () => { S.tab = t.dataset.t; $$('.tab').forEach(x => x.classList.toggle('on', x === t)); paintTabsPill(); buzz(); load(true); });
   let sig = '';
   async function load(animate) {
@@ -572,6 +583,69 @@ function confirmView() {
     };
   };
   draw();
+}
+
+
+/* ================================================================== AGENT: ombor · balanslar · savdom */
+const agoAgo = t => { if (!t) return 'hali yangilanmagan'; const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? 'hozirgina yangilandi' : m < 60 ? m + ' daqiqa oldin yangilandi' : Math.round(m / 60) + ' soat oldin yangilandi'; };
+async function stockView() {
+  clearTimer(); setBack(home); setDock(null); updateCartBar(false);
+  render(`<h2 class="vt" data-a>📦 Omborda bor mahsulotlar</h2>
+    <input id="stq" placeholder="🔍 Mahsulot qidirish" data-a>
+    <div class="cats" id="stc" data-a></div><div id="stl"><div class="sk"></div><div class="sk"></div></div>`);
+  let items = [];
+  let r0; try { r0 = await api('/api/products'); items = r0.items.filter(p => p.stock != null && p.stock > 0); } catch (e) { $('#stl').innerHTML = `<div class="mut">${esc(e.message)}</div>`; return; }
+  if (!r0.items.some(p => p.stock != null)) { $('#stc').remove(); $('#stl').innerHTML = '<div class="card" style="text-align:center">📦 Ombor qoldig\'i hali yuklanmagan.<br><span class="mut">Admin Sales Doctor\'dan qoldiqni yangilagach shu yerda chiqadi.</span></div>'; return; }
+  const cats = ['Hammasi', ...new Set(items.map(p => p.cat || 'Boshqa'))]; let cat = 'Hammasi';
+  const draw = () => {
+    const q = $('#stq').value.trim().toLowerCase();
+    const L = items.filter(p => (cat === 'Hammasi' || (p.cat || 'Boshqa') === cat) && (!q || p.name.toLowerCase().includes(q)));
+    $('#stc').innerHTML = cats.map(c => `<button class="chip ${c === cat ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}</button>`).join('');
+    $$('#stc [data-c]').forEach(b => b.onclick = () => { cat = b.dataset.c; draw(); });
+    $('#stl').innerHTML = `<div class="mut" style="margin:4px 2px 8px">${L.length} ta mahsulot</div>` + (L.map(p => `<div class="card strow"><div><b>${esc(p.name)}</b><div class="mut">${money(p.price)} so'm / ${p.unit === 'kg' ? 'kg' : 'dona'}</div></div>
+      <span class="stq ${p.stock < 10 ? 'lo' : ''}">${fq(p.stock)} ${p.unit === 'kg' ? 'kg' : 'dona'}</span></div>`).join('') || '<div class="mut" style="padding:20px;text-align:center">Topilmadi</div>');
+  };
+  $('#stq').oninput = draw; draw();
+}
+async function balView() {
+  clearTimer(); setBack(home); setDock(null); updateCartBar(false);
+  render(`<h2 class="vt" data-a>💰 Mijozlar balansi</h2><div id="bsum" data-a></div>
+    <input id="bq" placeholder="🔍 Mijoz qidirish" data-a>
+    <div class="tabs" data-a style="margin-top:10px"><i class="pill"></i><div class="tab on" data-t="debt">Qarzdorlar</div><div class="tab" data-t="all">Hammasi</div></div>
+    <div id="bl"><div class="sk"></div><div class="sk"></div></div>`);
+  setTimeout(paintTabsPill, 30);
+  let r, tab = 'debt';
+  try { r = await api('/api/agent/balances'); } catch (e) { $('#bl').innerHTML = `<div class="mut">${esc(e.message)}</div>`; return; }
+  $('#bsum').innerHTML = `<div class="card balsum"><small>Mijozlaringizning umumiy qarzi</small><b>${money(r.debt)} so'm</b><span>${r.n_debt} ta mijoz qarzdor · ${agoAgo(r.t)}</span></div>`;
+  const draw = () => {
+    const q = $('#bq').value.trim().toLowerCase();
+    const L = r.items.filter(c => (tab === 'all' || (c.balance || 0) < 0) && (!q || (c.name + ' ' + (c.region || '') + ' ' + (c.ext_id || '')).toLowerCase().includes(q)));
+    $('#bl').innerHTML = L.map(c => { const b = c.balance; return `<div class="card strow"><div><b>${esc(c.name)}</b><div class="mut">${esc(c.region || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</div></div>
+      <span class="bal ${b == null ? '' : b < 0 ? 'neg' : 'pos'}">${b == null ? '—' : (b < 0 ? '−' : '') + money(Math.abs(b))}</span></div>`; }).join('') || '<div class="mut" style="padding:20px;text-align:center">Topilmadi</div>';
+  };
+  $$('.tab').forEach(t => t.onclick = () => { tab = t.dataset.t; $$('.tab').forEach(x => x.classList.toggle('on', x === t)); paintTabsPill(); buzz(); draw(); });
+  $('#bq').oninput = draw; draw();
+}
+async function statsView(focus) {
+  clearTimer(); setBack(home); setDock(null); updateCartBar(false);
+  render(`<h2 class="vt" data-a>📊 Mening savdom</h2>
+    <div class="tabs" data-a><i class="pill"></i><div class="tab on" data-t="today">Bugun</div><div class="tab" data-t="month">Shu oy</div></div>
+    <div id="sv"><div class="sk"></div><div class="sk"></div></div>
+    <h3 class="vt2" id="remH" data-a>⚠️ O'tgan oyga nisbatan kam yoki umuman sotilmagan</h3><div id="rl"><div class="sk"></div></div>`);
+  setTimeout(paintTabsPill, 30);
+  let r, tab = 'today';
+  try { r = await api('/api/agent/stats'); } catch (e) { $('#sv').innerHTML = `<div class="mut">${esc(e.message)}</div>`; return; }
+  const draw = () => {
+    const L = r[tab] || [], tq = L.reduce((s, c) => s + c.qty, 0), ts = L.reduce((s, c) => s + c.sum, 0), mx = Math.max(1, ...L.map(c => c.sum));
+    $('#sv').innerHTML = `<div class="card balsum"><small>${tab === 'today' ? 'Bugungi' : 'Shu oydagi'} zakaslar</small><b>${money(ts)} so'm</b><span>${fq(tq)} miqdor · ${L.length} kategoriya${tab === 'month' && r.last_total ? ' · o\'tgan oy jami ' + money(r.last_total) : ''}</span></div>` +
+      (L.map(c => `<div class="card catrow"><div class="row"><b>${esc(c.cat)}</b><b>${money(c.sum)}</b></div><div class="bar"><i style="width:${Math.round(100 * c.sum / mx)}%"></i></div><div class="mut">${fq(c.qty)} miqdor</div></div>`).join('') || '<div class="mut" style="padding:16px;text-align:center">Hali zakas yo\'q</div>');
+  };
+  $$('.tab').forEach(t => t.onclick = () => { tab = t.dataset.t; $$('.tab').forEach(x => x.classList.toggle('on', x === t)); paintTabsPill(); buzz(); draw(); });
+  draw();
+  $('#rl').innerHTML = (r.remind.length ? r.remind.map(p => `<div class="card remrow ${p.kind}"><div><b>${esc(p.name)}</b><div class="mut">${esc(p.cat)} · o'tgan oy: ${fq(p.lq)} (${money(p.ls)} so'm)</div></div>
+    <span class="rk">${p.kind === 'none' ? 'Bu oy 0' : 'Bu oy ' + fq(p.q) + ' · ' + p.pct + '%'}</span></div>`).join('') : '<div class="card" style="text-align:center">✅ Hammasi joyida — o\'tgan oyga nisbatan orqada qolgan mahsulot yo\'q</div>') +
+    `<div class="mut" style="text-align:center;margin:10px 0 30px">Mijozlarga bersangiz, ro'yxat o'zi yangilanadi · ${agoAgo(r.t)}</div>`;
+  if (focus === 'remind') setTimeout(() => $('#remH').scrollIntoView({ behavior: 'smooth' }), 150);
 }
 
 /* ================================================================== VOZVRAT (skladchi) */

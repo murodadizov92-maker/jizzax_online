@@ -533,3 +533,28 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 #intro{background:#ECECF0!important}
 #vintro{position:fixed;inset:0;z-index:300;background:#ECECF0;display:flex;align-items:center;justify-content:center}
 #vintro video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+
+/* ---------- AGENT: ombor · balans · savdom ---------- */
+.aq{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
+.aq button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:14px 12px;border:1px solid #EEE7E1;border-radius:18px;background:#fff;box-shadow:0 6px 18px rgba(30,20,10,.06);text-align:left}
+.aq button i{font-style:normal;font-size:24px;margin-bottom:4px}
+.aq button b{font-size:15px;color:#1A1626}
+.aq button small{font-size:12px;color:#8A8597}
+.aq button:active{transform:scale(.97)}
+.remind{display:flex;flex-direction:column;gap:2px;padding:12px 14px;margin-bottom:12px;border-radius:16px;background:#FFF4E5;border:1px solid #FFD9A8;color:#8A4B00;cursor:pointer}
+.remind b{font-size:14px}.remind span{font-size:13px}.remind em{font-style:normal;font-weight:800;font-size:13px;color:var(--acc)}
+.vt{font-size:20px;margin:6px 2px 12px}.vt2{font-size:16px;margin:22px 2px 10px}
+.strow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px!important}
+.strow b{font-size:14.5px}
+.stq{flex:none;font-weight:800;color:#0F7B4E;background:#E6F7EF;border-radius:10px;padding:6px 10px;font-size:14px}
+.stq.lo{color:#B54708;background:#FFF1E0}
+.bal{flex:none;font-weight:800;font-size:15px}.bal.neg{color:#D92D20}.bal.pos{color:#0F7B4E}
+.balsum{display:flex;flex-direction:column;gap:2px}
+.balsum small{color:#8A8597}.balsum b{font-size:24px}.balsum span{font-size:12.5px;color:#8A8597}
+.catrow .bar{height:7px;border-radius:5px;background:#F1ECE7;margin:8px 0 4px;overflow:hidden}
+.catrow .bar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#F7A34B,var(--acc))}
+.remrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px!important;border-left:5px solid #F79009!important}
+.remrow.none{border-left-color:#D92D20!important}
+.remrow .rk{flex:none;font-size:12.5px;font-weight:800;color:#B54708;background:#FFF1E0;border-radius:10px;padding:5px 9px}
+.remrow.none .rk{color:#D92D20;background:#FEE4E2}
+#stc{display:flex;gap:8px;overflow-x:auto;margin:10px 0;padding-bottom:4px}

@@ -101,7 +101,9 @@ for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
              "ALTER TABLE clients ADD COLUMN added_by INTEGER DEFAULT 0",   # ilovada qo'lda qo'shilgan mijoz (kim qo'shgan)
              "ALTER TABLE clients ADD COLUMN added_at INTEGER DEFAULT 0",
              "ALTER TABLE orders ADD COLUMN printed_at INTEGER DEFAULT 0",
-             "ALTER TABLE orders ADD COLUMN req_id TEXT DEFAULT ''"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
+             "ALTER TABLE orders ADD COLUMN req_id TEXT DEFAULT ''",
+             "ALTER TABLE clients ADD COLUMN balance REAL",                   # Jarvis'dan: mijoz balansi (manfiy = qarz)
+             "ALTER TABLE clients ADD COLUMN bal_t INTEGER DEFAULT 0"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
     try:
         db.execute(_sql)
     except sqlite3.OperationalError:
@@ -1165,7 +1167,7 @@ async def h_clients(request):
     region = request.query.get("region", "").strip()
     if not request["admin"]:                      # agentga faqat o'z mijozlari (so'rovdagi filtr e'tiborga olinmaydi)
         region = request["agent"]
-    sql, args = "SELECT id,name,phone,region,address,agent FROM clients WHERE 1=1", []
+    sql, args = "SELECT id,name,phone,region,address,agent,balance FROM clients WHERE 1=1", []
     if region:
         sql += " AND agent=?"
         args.append(region)
@@ -2049,6 +2051,98 @@ async def h_j_staff_delete(request):
     return web.json_response({"ok": True})
 
 
+# ---------------------------------------------------------------- AGENT: mijoz balanslari + savdo hisoboti (Jarvis'dan har 10 daq.)
+async def h_j_balances(request):
+    _jarvis_ok(request)
+    items = (await request.json()).get("items") or []
+    t = now()
+    cur = db.executemany("UPDATE clients SET balance=?, bal_t=? WHERE ext_id=?",
+                         [(float(x.get("bal") or 0), t, str(x.get("id"))) for x in items if x.get("id")])
+    db.commit()
+    kv_set("bal_t", str(t))
+    return web.json_response({"ok": True, "updated": cur.rowcount})
+
+
+async def h_j_agent_stats(request):
+    _jarvis_ok(request)
+    b = await request.json()
+    if b.get("agent") not in ret_agents():
+        return web.json_response({"error": "Agent topilmadi"}, status=400)
+    b["t"] = now()
+    kv_set("astats:" + b["agent"], json.dumps(b, ensure_ascii=False))
+    return web.json_response({"ok": True})
+
+
+def _who_agent(request):
+    if request["role"] == "agent":
+        return request["agent"]
+    if request["role"] == "admin":
+        return request.query.get("agent", "").strip()
+    return ""
+
+
+async def h_agent_balances(request):
+    ag = _who_agent(request)
+    if not ag:
+        return web.json_response({"error": "Faqat agent uchun"}, status=403)
+    rows = [dict(r) for r in db.execute("SELECT id,ext_id,name,region,phone,balance FROM clients WHERE agent=? ORDER BY COALESCE(balance,0), name", (ag,))]
+    debt = sum(-(r["balance"] or 0) for r in rows if (r["balance"] or 0) < 0)
+    return web.json_response({"items": rows, "debt": debt, "n_debt": sum(1 for r in rows if (r["balance"] or 0) < 0),
+                              "t": int(kv_get("bal_t") or 0)})
+
+
+async def h_agent_stats(request):
+    ag = _who_agent(request)
+    if not ag:
+        return web.json_response({"error": "Faqat agent uchun"}, status=403)
+    try:
+        st = json.loads(kv_get("astats:" + ag) or "{}")
+    except Exception:
+        st = {}
+    prods = st.get("products") or []
+    today = {c["cat"]: c for c in st.get("today") or []}
+    month = {c["cat"]: c for c in st.get("month") or []}
+    # Jarvis'ga hali tushmagan, shu ilovadan berilgan zakaslar ham darhol hisobga qo'shiladi (ro'yxat yangilanib boradi)
+    t0 = int(st.get("t") or 0)
+    idx = [(p, pkey(p["name"])) for p in prods]
+    d0 = datetime.utcnow() + timedelta(hours=5)
+    day0 = int((datetime(d0.year, d0.month, d0.day) - timedelta(hours=5)).timestamp())
+    for o in db.execute("SELECT created, items FROM orders WHERE created>? AND client_id IN (SELECT id FROM clients WHERE agent=?) AND status!='cancelled'", (t0, ag)).fetchall():
+        for it in json.loads(o["items"] or "[]"):
+            k, nums = pkey(it["name"])
+            best, bp = 0.0, None
+            for p, (k2, n2) in idx:
+                if n2 != nums:
+                    continue
+                r = 1.0 if k == k2 else SequenceMatcher(None, k, k2).ratio()
+                if r > best:
+                    best, bp = r, p
+            if not bp or best < 0.85:
+                continue
+            q, sm = float(it["qty"]), float(it["qty"]) * float(it["price"])
+            bp["q"] = bp.get("q", 0) + q
+            bp["s"] = bp.get("s", 0) + sm
+            for dct, ok in ((month, True), (today, o["created"] >= day0)):
+                if ok:
+                    c = dct.setdefault(bp["cat"], {"cat": bp["cat"], "qty": 0, "sum": 0})
+                    c["qty"] += q
+                    c["sum"] += sm
+    day, mdays = int(st.get("day") or d0.day), int(st.get("mdays") or 30)
+    remind = []
+    for p in prods:
+        if not p.get("lq"):
+            continue
+        exp = p["lq"] * day / mdays                                  # o'tgan oy sur'atida shu kungacha kutilgan
+        if p.get("q", 0) <= 0:
+            remind.append({**p, "kind": "none"})
+        elif p["q"] < exp * 0.5:
+            remind.append({**p, "kind": "low", "pct": round(100 * p["q"] / exp) if exp else 0})
+    remind.sort(key=lambda x: (x["kind"] != "none", -x.get("ls", 0)))
+    srt = lambda d: sorted(d.values(), key=lambda x: -x["sum"])
+    return web.json_response({"t": t0, "today": srt(today), "month": srt(month), "remind": remind[:60],
+                              "last_total": sum(p.get("ls", 0) for p in prods), "day": day, "mdays": mdays})
+
+
 BOOT_V = str(int(time.time()))
 
 
@@ -2137,6 +2231,10 @@ def make_app():
         web.post("/jarvis/settings", h_j_settings),
         web.get("/jarvis/agents", h_j_agents),
         web.get("/jarvis/staff", h_j_staff),
+        web.post("/jarvis/balances", h_j_balances),
+        web.post("/jarvis/agent_stats", h_j_agent_stats),
+        web.get("/api/agent/balances", h_agent_balances),
+        web.get("/api/agent/stats", h_agent_stats),
         web.post("/jarvis/staff", h_j_staff_save),
         web.post("/jarvis/staff/delete", h_j_staff_delete),
         web.post("/jarvis/agent_prices", h_j_agent_prices),
