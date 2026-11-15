@@ -465,7 +465,7 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 .lk-keys button{height:62px;border-radius:18px;border:0;background:#fff;font:inherit;font-size:26px;font-weight:700;color:var(--txt)}
 .lk-keys button:active{background:#FFF1E9}
 .lk-keys .lk-fp{background:var(--acc);color:#fff;display:flex;align-items:center;justify-content:center}
-.lk-keys .lk-fp svg{width:30px;height:30px}
+.lk-keys .lk-fp svg{width:42px;height:42px;stroke-width:1.7}
 .lk-keys .lk-del{background:transparent;font-size:15px;color:var(--mut)}
 /* bildirishnomalar */
 #nbadge{position:absolute;top:2px;right:calc(50% - 22px);min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:999px;background:#E5322D;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff}
