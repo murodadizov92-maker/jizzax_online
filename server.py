@@ -1746,6 +1746,26 @@ async def h_j_settings(request):
     if request.method == "POST":
         b = await request.json()
         pre = "otk" if b.get("which") == "otk" else "ret"
+        if b.get("link"):                      # topikdagi xabar havolasi: t.me/c/<chat>/<topic>/<xabar> yoki t.me/<username>/<topic>/<xabar>
+            m = re.search(r"t\.me/c/(\d+)/(\d+)(?:/(\d+))?", str(b["link"]))
+            if m:
+                chat, topic = "-100" + m.group(1), m.group(2) if m.group(3) else ""
+            else:
+                m = re.search(r"t\.me/([A-Za-z]\w{3,})/(\d+)(?:/(\d+))?", str(b["link"]))
+                if not m:
+                    return web.json_response({"error": "Havola tanilmadi. Topikdagi xabarni bosib «Копировать ссылку» ni tanlang"}, status=400)
+                chat, topic = "@" + m.group(1), m.group(2) if m.group(3) else ""
+            p = {"chat_id": chat, "text": "✅ " + ("Otkaz zakaslar" if pre == "otk" else "Vozvrat nakladnoylari") + " endi shu topikka tushadi"}
+            if topic:
+                p["message_thread_id"] = int(topic)
+            res = await tg("sendMessage", **p)
+            if not (res or {}).get("ok"):
+                return web.json_response({"error": "Bot bu topikka yoza olmadi: " + str((res or {}).get("description", "Telegram javob bermadi")) + ". Bot guruhda admin ekanini tekshiring"}, status=400)
+            chat = str(((res.get("result") or {}).get("chat") or {}).get("id") or chat)
+            kv_set(pre + "_chat", chat)
+            kv_set(pre + "_topic", topic)
+            return web.json_response({"ok": True, "ret_chat": kv_get("ret_chat") or "", "ret_topic": kv_get("ret_topic") or "",
+                                      "otk_chat": kv_get("otk_chat") or "", "otk_topic": kv_get("otk_topic") or ""})
         if b.get("clear"):
             kv_set(pre + "_chat", "")
             kv_set(pre + "_topic", "")
