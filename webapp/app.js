@@ -918,6 +918,7 @@ const NBIO = NATIVE && NATIVE.canBiometric ? {            // APK: Android Biomet
 } : null;
 function bioInit() { return new Promise(res => { if (NBIO) { let ok = false; try { ok = !!NATIVE.canBiometric(); } catch (e) {} return res(ok); } if (!BIO) return res(false); try { BIO.init(() => { bioReady = true; res(BIO.isBiometricAvailable); }); } catch (e) { res(false); } }); }
 async function sha(s) { try { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('mc:' + s)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); } catch (e) { return 'p' + s; } }
+const tell = m => { try { if (tg && tg.showAlert && tg.platform !== 'unknown') return tg.showAlert(m); } catch (e) {} alert(m); };
 const ask = m => new Promise(res => { try { if (tg && tg.showConfirm && tg.platform !== 'unknown') return tg.showConfirm(m, ok => res(!!ok)); } catch (e) {} res(confirm(m)); });
 const lockOn = () => !!(LS.get('pinh') || LS.get('bio') === '1');
 const initials = n => String(n || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'MC';
@@ -938,7 +939,7 @@ function showLock(onOpen, mode = 'unlock', mandatory = false) {          // mode
       ${mode === 'unlock' ? `<button type="button" id="lkForgot" style="margin-top:auto;border:0;background:none;color:var(--mut);font:inherit;font-size:14px">Kodni unutdingizmi?</button>` : mandatory ? '' : `<button type="button" id="lkCancel" style="margin-top:auto;border:0;background:none;color:var(--mut);font:inherit;font-size:15px;font-weight:700">Bekor qilish</button>`}`;
     $$('[data-k]', L).forEach(b => b.onclick = () => key(b.dataset.k));
     const fp = $('.lk-fp', L); if (fp) fp.onclick = bio;
-    const fg = $('#lkForgot'); if (fg) fg.onclick = async () => { if (await ask("PIN va barmoq izi o'chiriladi, ilova ochiladi. Davom etasizmi?")) { LS.set('pinh', null); LS.set('bio', null); if (APP) { tokenSet(''); L.classList.add('hidden'); return loginView(); } done(); } };
+    const fg = $('#lkForgot'); if (fg) fg.onclick = () => tell("Kodni unutgan bo'lsangiz, adminga murojaat qiling.\nAdmin parolingizni yangilaydi — shundan keyin login va yangi parol bilan kirib, yangi kod qo'yasiz.");
     const cn = $('#lkCancel'); if (cn) cn.onclick = () => { L.classList.add('hidden'); onOpen && onOpen(false); };
   };
   const done = () => { L.classList.add('hidden'); buzz('medium'); onOpen && onOpen(true); };
@@ -998,10 +999,12 @@ async function profileView() {
     (NBIO || BIO).isAccessGranted ? go() : (NBIO || BIO).requestAccess({ reason: 'Online zakas ilovasiga barmoq izi bilan kirish' }, ok => ok ? go() : toast("Ruxsat berilmadi — Telegram sozlamalaridan yoqing"));
   };
   $('#pfOut').onclick = async () => {
-    if (!(await ask('Profildan chiqasizmi?' + (lockOn() ? '' : "\n(Qayta kirishni himoyalash uchun PIN yoki barmoq izini yoqing)")))) return;
-    if (lockOn()) { setDock(null); vidShown = false; showLock(ok => ok && playVid().then(home)); }
-    else if (APP) { try { await api('/api/app/logout', { method: 'POST' }); } catch (e) {} tokenSet(''); loginView(); }
-    else if (tg && tg.close) tg.close(); else home();
+    if (!(await ask("Profildan chiqasizmi?\nQayta kirish uchun login va parol kerak bo'ladi."))) return;
+    // haqiqiy chiqish: serverdagi kirish yopiladi, telefondagi PIN va barmoq izi o'chiriladi
+    if (APP) { try { await api('/api/app/logout', { method: 'POST' }); } catch (e) {} }
+    LS.set('pinh', null); LS.set('bio', null); unlocked = false; vidShown = false;
+    if (APP) { tokenSet(''); setDock(null); return loginView(); }
+    if (tg && tg.close) tg.close(); else home();
   };
   if (SK) {                                          // skladchi: o'z ko'rsatkichlari
     try {
