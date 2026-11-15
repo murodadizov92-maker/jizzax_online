@@ -132,7 +132,7 @@ public class MainActivity extends AppCompatActivity {
                             public void onAuthenticationError(int code, CharSequence msg) { bioResult(false); }
                         });
                 BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
-                        .setTitle("MeatCity · Online zakas")
+                        .setTitle("MeatCity Agent")
                         .setSubtitle(reason == null || reason.isEmpty() ? "Barmoq izini qo'ying" : reason)
                         .setNegativeButtonText("PIN kod bilan")
                         .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
