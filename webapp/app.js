@@ -656,7 +656,7 @@ function showLock(onOpen, mode = 'unlock', mandatory = false) {          // mode
   if (mandatory) { title.set = "O'zingizga 4 xonali kod qo'ying"; sub.set = 'Keyingi safar ilovaga shu kod bilan kirasiz'; }
   const draw = () => {
     const showPad = mode !== 'unlock' || LS.get('pinh');
-    L.innerHTML = `<div class="lk-logo">mc</div><div class="lk-brand">MEATCITY · ONLINE ZAKAS</div>
+    L.innerHTML = `<div class="lk-logo"><div class="lk-coin"><img src="/static/logo.png" alt="MeatCity"><img src="/static/logo.png" alt="" aria-hidden="true" class="bk"></div></div><div class="lk-brand">MEATCITY · AGENT</div>
       <div class="lk-hi">${title[mode]}</div><div class="lk-sub">${sub[mode]}</div>
       ${showPad ? `<div class="lk-dots">${[0, 1, 2, 3].map(i => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join('')}</div>` : '<div style="height:40px"></div>'}
       <div class="lk-keys">${showPad ? [1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => `<button type="button" data-k="${k}">${k}</button>`).join('') : ''}
@@ -762,7 +762,7 @@ setInterval(() => { if (S.me && S.me.allowed && !document.hidden) pollNotes(); }
 function loginView() {
   setDock(null); updateCartBar(false); setBack(null);
   const L = $('#lock');
-  L.innerHTML = `<div class="lk-logo">mc</div><div class="lk-brand">MEATCITY · ONLINE ZAKAS</div>
+  L.innerHTML = `<div class="lk-logo"><div class="lk-coin"><img src="/static/logo.png" alt="MeatCity"><img src="/static/logo.png" alt="" aria-hidden="true" class="bk"></div></div><div class="lk-brand">MEATCITY · AGENT</div>
     <div class="lk-hi">Ilovaga kirish</div><div class="lk-sub">Admin bergan login va parolni kiriting</div>
     <form id="lgForm" style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;margin-top:18px">
       <label class="mut" style="font-size:13px;font-weight:700">Login<input id="lgL" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" style="margin-top:4px;width:100%;box-sizing:border-box;height:52px;padding:0 14px;font-size:17px"></label>

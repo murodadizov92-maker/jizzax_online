@@ -483,3 +483,12 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 .nrow.unread .nh b::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--acc);margin-left:6px;vertical-align:middle}
 #offline{position:fixed;left:0;right:0;top:0;z-index:300;background:#B42318;color:#fff;font-weight:700;font-size:14px;text-align:center;padding:calc(8px + env(safe-area-inset-top)) 12px 8px;transform:translateY(-100%);transition:transform .25s}
 #offline.show{transform:none}
+/* qulf/kirish ekranidagi aylanuvchi brend logotipi */
+.lk-logo{width:140px!important;height:110px!important;background:none!important;perspective:700px;display:flex;align-items:center;justify-content:center;position:relative}
+.lk-logo::after{content:"";position:absolute;bottom:-6px;left:50%;width:90px;height:12px;margin-left:-45px;border-radius:50%;background:rgba(120,10,20,.18);filter:blur(4px);animation:lkShadow 4s ease-in-out infinite}
+.lk-coin{position:relative;width:130px;height:96px;transform-style:preserve-3d;animation:lkSpin 4s cubic-bezier(.45,.05,.55,.95) infinite}
+.lk-coin img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backface-visibility:hidden;-webkit-backface-visibility:hidden;filter:drop-shadow(0 8px 14px rgba(150,10,25,.35))}
+.lk-coin img.bk{transform:rotateY(180deg)}
+@keyframes lkSpin{0%{transform:rotateY(0) translateY(0)}35%{transform:rotateY(0) translateY(-4px)}65%{transform:rotateY(360deg) translateY(-4px)}100%{transform:rotateY(360deg) translateY(0)}}
+@keyframes lkShadow{0%,100%{transform:scaleX(1);opacity:1}50%{transform:scaleX(.55);opacity:.6}}
+@media (prefers-reduced-motion:reduce){.lk-coin,.lk-logo::after{animation:none}}
