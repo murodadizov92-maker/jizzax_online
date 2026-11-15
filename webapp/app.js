@@ -219,7 +219,8 @@ async function playIntro() {                     // ilova yuklanguncha qisqa och
 }
 playIntro();
 const VID = document.createElement('video');      // oldindan yuklab qo'yiladi — kod terilgach kutmasdan chiqadi
-Object.assign(VID, { src: '/static/intro.mp4', muted: true, playsInline: true, preload: 'auto' });
+Object.assign(VID, { src: '/static/intro.mp4', muted: true, playsInline: true, preload: 'auto', poster: '/static/intro.jpg', controls: false, defaultPlaybackRate: 1.5 });
+VID.addEventListener('playing', () => VID.classList.add('on'));   // telefonning kulrang "▶" belgisi ko'rinmasin: video faqat o'ynay boshlaganda chiqadi
 VID.setAttribute('muted', ''); VID.setAttribute('playsinline', ''); VID.setAttribute('webkit-playsinline', '');
 let vidShown = false;
 function playVid() {                               // to'liq ekran brend videosi (3 s), bosilsa o'tib ketadi; har ochilishda bir marta
@@ -230,8 +231,8 @@ function playVid() {                               // to'liq ekran brend videosi
     let done = false;
     const end = () => { if (done) return; done = true; const a = box.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, fill: 'forwards' }); a.onfinish = () => { box.remove(); try { VID.pause(); } catch (e) {} }; res(); };
     VID.onended = end; VID.onerror = end; box.onclick = end;
-    setTimeout(end, 5000);                         // video ochilmasa ham ilova to'xtab qolmasin
-    try { VID.currentTime = 0; const p = VID.play(); if (p && p.catch) p.catch(end); } catch (e) { end(); }
+    setTimeout(end, 4000);                         // video ochilmasa ham ilova to'xtab qolmasin
+    try { VID.currentTime = 0; VID.playbackRate = 1.5; const p = VID.play(); if (p && p.catch) p.catch(end); } catch (e) { end(); }
   });
 }
 

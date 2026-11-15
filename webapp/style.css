@@ -531,8 +531,10 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 
 /* ---------- brend videosi (kod/barmoq izidan keyin) ---------- */
 #intro{background:#ECECF0!important}
-#vintro{position:fixed;inset:0;z-index:300;background:#ECECF0;display:flex;align-items:center;justify-content:center}
-#vintro video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+#vintro{position:fixed;inset:0;z-index:300;background:#ECECF0 url(/static/intro.jpg) center/cover no-repeat;display:flex;align-items:center;justify-content:center}
+#vintro video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;opacity:0;transition:opacity .15s}
+#vintro video.on{opacity:1}
+#vintro video::-webkit-media-controls,#vintro video::-webkit-media-controls-start-playback-button,#vintro video::-webkit-media-controls-overlay-play-button{display:none!important;-webkit-appearance:none}
 
 /* ---------- AGENT: ombor · balans · savdom ---------- */
 .aq{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
