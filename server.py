@@ -27,6 +27,7 @@ log = logging.getLogger("online")
 
 BASE = Path(__file__).parent
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+PUSH_PRIVATE = os.getenv("PUSH_PRIVATE", "1") != "0"   # bildirishnomani botdan shaxsiy xabar qilib ham yuborish
 JARVIS_KEY = os.getenv("JARVIS_KEY", "").strip()   # Jarvis (kompyuter) ilovasi uchun maxfiy kalit
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x}
 CHAT_ID = os.getenv("CHAT_ID", "")            # zakas guruhi ID (masalan -1001234567890)
@@ -77,13 +78,18 @@ CREATE TABLE IF NOT EXISTS stock(
   key TEXT PRIMARY KEY, name TEXT, qty REAL, unit TEXT DEFAULT '', src TEXT, updated INTEGER);
 CREATE TABLE IF NOT EXISTS pmeta(pid TEXT PRIMARY KEY, unit TEXT);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS app_tokens(th TEXT PRIMARY KEY, tg_id INTEGER, created INTEGER, last_used INTEGER, device TEXT);
+CREATE TABLE IF NOT EXISTS app_logins(login TEXT PRIMARY KEY, pw TEXT, tg_id INTEGER UNIQUE, created INTEGER);
+CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, kind TEXT, title TEXT, body TEXT, order_id INTEGER, created INTEGER, read INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(tg_id, id);
 CREATE TABLE IF NOT EXISTS access(tg_id INTEGER PRIMARY KEY, agent TEXT NOT NULL, added INTEGER);
 """
 )
 for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
              "ALTER TABLE clients ADD COLUMN added_by INTEGER DEFAULT 0",   # ilovada qo'lda qo'shilgan mijoz (kim qo'shgan)
              "ALTER TABLE clients ADD COLUMN added_at INTEGER DEFAULT 0",
-             "ALTER TABLE orders ADD COLUMN printed_at INTEGER DEFAULT 0"):   # Jarvis'da chop etilgan vaqt
+             "ALTER TABLE orders ADD COLUMN printed_at INTEGER DEFAULT 0",
+             "ALTER TABLE orders ADD COLUMN req_id TEXT DEFAULT ''"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
     try:
         db.execute(_sql)
     except sqlite3.OperationalError:
@@ -603,6 +609,14 @@ def verify_init(init: str):
 async def auth_mw(request: web.Request, handler):
     if request.path.startswith("/api/"):
         user = verify_init(request.headers.get("X-Init-Data", ""))
+        if not user and request.headers.get("X-App-Token"):          # telefon ilovasi (APK) — bot kodi bilan olingan token
+            th = hashlib.sha256(request.headers["X-App-Token"].encode()).hexdigest()
+            row = db.execute("SELECT t.tg_id, u.name, u.username FROM app_tokens t LEFT JOIN users u ON u.tg_id=t.tg_id WHERE t.th=?", (th,)).fetchone()
+            if row:
+                db.execute("UPDATE app_tokens SET last_used=? WHERE th=?", (now(), th))
+                parts = (row["name"] or "Foydalanuvchi").split(" ", 1)
+                user = {"id": row["tg_id"], "first_name": parts[0], "last_name": parts[1] if len(parts) > 1 else "", "username": row["username"]}
+                request["app_th"] = th
         if not user and DEV and request.headers.get("X-Dev-User"):
             uid = int(request.headers["X-Dev-User"])
             user = {"id": uid, "first_name": f"Dev{uid}", "username": f"dev{uid}"}
@@ -743,6 +757,21 @@ async def tg(method: str, **params):
         log.warning("tg %s failed: %s", method, e)
 
 
+NOTE_ICON = {"order": "🆕", "status": "📦", "printed": "🖨", "delivered": "✅", "client": "👤", "info": "🔔"}
+
+
+def add_note(uids, kind, title, body="", order_id=None, push=True):
+    """Ilova ichidagi bildirishnoma + (mumkin bo'lsa) bot orqali shaxsiy Telegram xabar."""
+    uids = sorted({int(u) for u in uids if u})
+    for u in uids:
+        db.execute("INSERT INTO notes(tg_id,kind,title,body,order_id,created) VALUES(?,?,?,?,?,?)", (u, kind, title, body, order_id, now()))
+    db.execute("DELETE FROM notes WHERE created<?", (now() - 60 * 86400,))
+    db.commit()
+    if push and PUSH_PRIVATE:
+        for u in uids:          # foydalanuvchi botga /start bosmagan bo'lsa Telegram rad etadi — e'tiborsiz qoldiramiz
+            asyncio.create_task(tg("sendMessage", chat_id=u, text=f"{NOTE_ICON.get(kind, '🔔')} {title}" + (f"\n{body}" if body else ""), disable_notification=False))
+
+
 def topic_params():
     p = {"chat_id": CHAT_ID}
     if TOPIC_ID:
@@ -805,6 +834,78 @@ async def notify_order(o: dict):
         await tg("sendMessage", text="\n".join(lines), parse_mode="HTML", **topic_params())
 
 
+_login_fail = {}
+
+
+def pw_hash(pw: str, salt: bytes = None) -> str:
+    salt = salt or os.urandom(16)
+    return salt.hex() + "$" + hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 200_000).hex()
+
+
+def pw_check(pw: str, stored: str) -> bool:
+    try:
+        salt, _ = stored.split("$", 1)
+        return hmac.compare_digest(pw_hash(pw, bytes.fromhex(salt)), stored)
+    except Exception:
+        return False
+
+
+async def h_app_login(request):
+    """Telefon ilovasi: admin bergan login + parol -> token."""
+    import secrets
+    ip = request.headers.get("X-Forwarded-For", request.remote or "").split(",")[0].strip()
+    f = [t for t in _login_fail.get(ip, []) if t > now() - 600]
+    if len(f) >= 8:
+        return web.json_response({"error": "Ko'p noto'g'ri urinish. 10 daqiqadan keyin qayta urining"}, status=429)
+    b = await request.json()
+    login = str(b.get("login", "")).strip().lower()
+    row = db.execute("SELECT pw, tg_id FROM app_logins WHERE login=?", (login,)).fetchone()
+    if not row or not pw_check(str(b.get("password", "")), row["pw"]):
+        _login_fail[ip] = f + [now()]
+        return web.json_response({"error": "Login yoki parol noto'g'ri"}, status=400)
+    uid = row["tg_id"]
+    if not (uid in ADMIN_IDS or db.execute("SELECT 1 FROM access WHERE tg_id=?", (uid,)).fetchone()):
+        return web.json_response({"error": "Sizga ruxsat berilmagan"}, status=403)
+    token = secrets.token_urlsafe(32)
+    db.execute("INSERT INTO app_tokens(th,tg_id,created,last_used,device) VALUES(?,?,?,?,?)",
+               (hashlib.sha256(token.encode()).hexdigest(), uid, now(), now(), str(b.get("device", ""))[:80]))
+    db.commit()
+    return web.json_response({"ok": True, "token": token})
+
+
+async def h_user_login(request):
+    """Admin: foydalanuvchiga ilova uchun login/parol berish (bo'sh login — o'chirish)."""
+    need_admin(request)
+    tid = int(request.match_info["id"])
+    b = await request.json()
+    login = str(b.get("login", "")).strip().lower()
+    pw = str(b.get("password", ""))
+    if not login:
+        db.execute("DELETE FROM app_logins WHERE tg_id=?", (tid,))
+        db.execute("DELETE FROM app_tokens WHERE tg_id=?", (tid,))
+        db.commit()
+        return web.json_response({"ok": True})
+    if not re.fullmatch(r"[a-z0-9_.-]{3,32}", login):
+        return web.json_response({"error": "Login: 3-32 ta lotin harf yoki raqam"}, status=400)
+    if len(pw) < 6:
+        return web.json_response({"error": "Parol kamida 6 ta belgi"}, status=400)
+    other = db.execute("SELECT tg_id FROM app_logins WHERE login=?", (login,)).fetchone()
+    if other and other["tg_id"] != tid:
+        return web.json_response({"error": "Bu login band"}, status=400)
+    db.execute("DELETE FROM app_logins WHERE tg_id=?", (tid,))
+    db.execute("INSERT INTO app_logins(login,pw,tg_id,created) VALUES(?,?,?,?)", (login, pw_hash(pw), tid, now()))
+    db.execute("DELETE FROM app_tokens WHERE tg_id=?", (tid,))      # parol almashsa — eski kirishlar bekor
+    db.commit()
+    return web.json_response({"ok": True})
+
+
+async def h_app_logout(request):
+    if request.get("app_th"):
+        db.execute("DELETE FROM app_tokens WHERE th=?", (request["app_th"],))
+        db.commit()
+    return web.json_response({"ok": True})
+
+
 async def poll_bot():
     """/start (shaxsiy) va /panel (topik) buyruqlari uchun oddiy long-polling."""
     if not BOT_TOKEN:
@@ -857,7 +958,11 @@ def row_order(r) -> dict:
 
 
 async def h_health(request):
-    return web.json_response({"ok": True, "t": now()})
+    try:
+        db.execute("SELECT 1").fetchone()
+        return web.json_response({"ok": True, "t": now(), "db": True})
+    except Exception as e:
+        return web.json_response({"ok": False, "db": False, "error": str(e)[:100]}, status=503)
 
 
 async def h_me(request):
@@ -929,8 +1034,26 @@ async def h_jarvis_printed(request):
     ids = [int(x) for x in b.get("ids", [])][:300]
     val = 0 if b.get("undo") else now()
     db.executemany("UPDATE orders SET printed_at=? WHERE id=?", [(val, i) for i in ids])
+    if not b.get("undo"):
+        db.executemany("UPDATE orders SET status='collecting', updated=? WHERE id=? AND status='new'", [(now(), i) for i in ids])
+        for i in ids:
+            o = db.execute("SELECT tg_id, client_name FROM orders WHERE id=?", (i,)).fetchone()
+            if o:
+                add_note([o["tg_id"]], "printed", f"Zakas #{i} chop etildi · {o['client_name']}", "Skladda yig'ilmoqda")
     db.commit()
     return web.json_response({"ok": True, "n": len(ids)})
+
+
+async def h_notes(request):
+    rows = db.execute("SELECT id,kind,title,body,order_id,created,read FROM notes WHERE tg_id=? ORDER BY id DESC LIMIT 60", (request["uid"],)).fetchall()
+    unread = db.execute("SELECT COUNT(*) c FROM notes WHERE tg_id=? AND read=0", (request["uid"],)).fetchone()["c"]
+    return web.json_response({"items": [dict(r) for r in rows], "unread": unread})
+
+
+async def h_notes_read(request):
+    db.execute("UPDATE notes SET read=1 WHERE tg_id=? AND read=0", (request["uid"],))
+    db.commit()
+    return web.json_response({"ok": True})
 
 
 async def h_users(request):
@@ -939,7 +1062,8 @@ async def h_users(request):
                       "UNION ALL SELECT u.tg_id,u.name,u.username,u.last_seen,NULL FROM users u WHERE u.tg_id NOT IN (SELECT tg_id FROM access)").fetchall()
     rows = sorted(rows, key=lambda r: (r["agent"] is None, -(r["last_seen"] or 0)))[:300]
     agents = [r["agent"] for r in db.execute("SELECT agent FROM clients WHERE agent!='' GROUP BY agent ORDER BY COUNT(*) DESC").fetchall()]
-    return web.json_response({"items": [{**dict(r), "admin": r["tg_id"] in ADMIN_IDS} for r in rows], "agents": agents})
+    logins = {r["tg_id"]: r["login"] for r in db.execute("SELECT tg_id, login FROM app_logins").fetchall()}
+    return web.json_response({"items": [{**dict(r), "admin": r["tg_id"] in ADMIN_IDS, "login": logins.get(r["tg_id"], "")} for r in rows], "agents": agents})
 
 
 async def h_user_access(request):
@@ -1093,6 +1217,8 @@ async def h_client_add(request):
     )
     db.commit()
     row = db.execute("SELECT id,name,phone,region,address,agent,added_at FROM clients WHERE id=?", (cur.lastrowid,)).fetchone()
+    if not request["admin"]:
+        add_note(ADMIN_IDS, "client", f"Yangi mijoz: {name}", f"{agent} qo'shdi · {region or ''} {phone or ''}".strip(), push=False)
     return web.json_response({"ok": True, "client": dict(row)})
 
 
@@ -1118,8 +1244,16 @@ async def h_orders(request):
     return web.json_response({"items": [row_order(r) for r in db.execute(sql, args).fetchall()]})
 
 
+MAX_QTY = 100000
+
+
 async def h_order_create(request):
     b = await request.json()
+    req_id = re.sub(r"[^\w-]", "", str(b.get("req_id", "")))[:64]
+    if req_id:   # internet uzilib qayta yuborilsa yoki ikki marta bosilsa — o'sha zakasni qaytaramiz, yangisini ochmaymiz
+        dup = db.execute("SELECT * FROM orders WHERE tg_id=? AND req_id=?", (request["uid"], req_id)).fetchone()
+        if dup:
+            return web.json_response({"ok": True, "order": row_order(dup), "duplicate": True})
     client = db.execute("SELECT * FROM clients WHERE id=?", (b.get("client_id"),)).fetchone()
     if not client:
         return web.json_response({"error": "Mijoz tanlanmagan"}, status=400)
@@ -1130,7 +1264,7 @@ async def h_order_create(request):
     for it in b.get("items", []):
         p = catalog.get(str(it.get("id")))
         qty = _num(it.get("qty"))
-        if not p or qty <= 0:
+        if not p or not (0 < qty <= MAX_QTY):
             continue
         stk = p["stock"]
         items.append({"id": p["id"], "name": p["name"], "price": p["price"], "qty": qty, "unit": p["unit"],
@@ -1139,7 +1273,8 @@ async def h_order_create(request):
                       "note": str(it.get("note", ""))[:200]})  # narx va qoldiq serverdan — doim yangi
         total += p["price"] * qty
     if not items:
-        return web.json_response({"error": "Savat bo'sh"}, status=400)
+        return web.json_response({"error": "Savatdagi mahsulotlar topilmadi yoki miqdor noto'g'ri"}, status=400)
+    skipped = len(b.get("items", [])) - len(items)
     comment = str(b.get("comment", ""))[:300]
     ddate = str(b.get("ddate", ""))[:10]
     try:
@@ -1147,15 +1282,17 @@ async def h_order_create(request):
     except ValueError:
         ddate = (datetime.utcnow() + timedelta(hours=5, days=1)).strftime("%Y-%m-%d")   # ko'rsatilmasa — ertaga
     cur = db.execute(
-        "INSERT INTO orders(tg_id,user_name,client_id,client_name,region,items,total,comment,created,updated,ddate) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO orders(tg_id,user_name,client_id,client_name,region,items,total,comment,created,updated,ddate,req_id) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         (request["uid"], request["uname"], client["id"], client["name"], client["region"],
-         json.dumps(items, ensure_ascii=False), total, comment, now(), now(), ddate),
+         json.dumps(items, ensure_ascii=False), total, comment, now(), now(), ddate, req_id),
     )
     db.commit()
     o = row_order(db.execute("SELECT * FROM orders WHERE id=?", (cur.lastrowid,)).fetchone())
     asyncio.create_task(notify_order(o))
-    return web.json_response({"ok": True, "order": o})
+    add_note([a for a in ADMIN_IDS if a != request["uid"]], "order", f"Yangi zakas #{o['id']} · {o['client_name']}",
+             f"{request['uname']} · {money(o['total'])} so'm", o["id"])
+    return web.json_response({"ok": True, "order": o, "skipped": skipped})
 
 
 async def h_order_status(request):
@@ -1167,8 +1304,8 @@ async def h_order_status(request):
     db.execute("UPDATE orders SET status=?, updated=? WHERE id=?", (st, now(), oid))
     db.commit()
     o = db.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    if o and CHAT_ID:
-        asyncio.create_task(tg("sendMessage", text=f"Zakas #{oid} ({o['client_name']}): {STATUS_TEXT[st]}", **topic_params()))
+    if o:                                         # guruhga emas — zakas egasiga shaxsiy bildirishnoma
+        add_note([o["tg_id"]], "delivered" if st == "delivered" else "status", f"Zakas #{oid} · {o['client_name']}", STATUS_TEXT[st], oid)
     return web.json_response({"ok": True})
 
 
@@ -1190,6 +1327,30 @@ async def h_index(request):
 
 
 @web.middleware
+async def error_mw(request: web.Request, handler):
+    """Kutilmagan xato ilovani "qotirmasin": logga yoziladi, foydalanuvchiga tushunarli javob qaytadi."""
+    try:
+        return await handler(request)
+    except web.HTTPException:
+        raise
+    except json.JSONDecodeError:
+        return web.json_response({"error": "So'rov noto'g'ri formatda"}, status=400)
+    except Exception:
+        log.exception("Xato: %s %s", request.method, request.path)
+        return web.json_response({"error": "Serverda vaqtinchalik xato. Qayta urinib ko'ring"}, status=500)
+
+
+async def h_clientlog(request):
+    """Telefondagi JS xatolari — server logiga (sababini topish uchun)."""
+    try:
+        b = await request.json()
+        log.warning("CLIENT %s: %s | %s", request.get("uid"), str(b.get("msg", ""))[:300], str(b.get("at", ""))[:200])
+    except Exception:
+        pass
+    return web.json_response({"ok": True})
+
+
+@web.middleware
 async def nocache_mw(request: web.Request, handler):
     resp = await handler(request)
     if request.path.startswith("/static/") or request.path == "/":
@@ -1206,10 +1367,11 @@ async def on_start(app):
 
 
 def make_app():
-    app = web.Application(middlewares=[nocache_mw, auth_mw], client_max_size=20 * 1024 * 1024)
+    app = web.Application(middlewares=[error_mw, nocache_mw, auth_mw], client_max_size=20 * 1024 * 1024)
     app.add_routes([
         web.get("/", h_index),
         web.get("/health", h_health),
+        web.post("/api/clientlog", h_clientlog),
         web.get("/api/me", h_me),
         web.put("/api/me", h_me_put),
         web.get("/api/products", h_products),
@@ -1219,6 +1381,11 @@ def make_app():
         web.get("/jarvis/invoice/{id}.jpg", h_jarvis_invoice),
         web.post("/jarvis/printed", h_jarvis_printed),
         web.get("/api/users", h_users),
+        web.get("/api/notes", h_notes),
+        web.post("/app/login", h_app_login),
+        web.post("/api/app/logout", h_app_logout),
+        web.put("/api/users/{id}/login", h_user_login),
+        web.post("/api/notes/read", h_notes_read),
         web.put("/api/users/{id}/access", h_user_access),
         web.get("/api/stock/status", h_stock_status),
         web.post("/api/stock/sync", h_stock_sync),

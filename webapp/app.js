@@ -1,6 +1,6 @@
 /* MeatCity Jizzax — Online zakas Mini App (v2: animatsiyali) */
 const tg = window.Telegram && Telegram.WebApp;
-if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor('#efe3d7'); tg.setBackgroundColor('#e8dccf'); } catch (e) {} }
+if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor('#F4F5F9'); tg.setBackgroundColor('#F4F5F9'); } catch (e) {} }
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -8,19 +8,52 @@ const money = v => Math.round(v).toLocaleString('ru-RU').replace(/,/g, ' ');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const REDUCE = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const DEV = new URLSearchParams(location.search).get('dev');
+const APP = !DEV && !(tg && tg.initData);                  // Telegram'dan tashqari (APK yoki brauzer) — bot kodi bilan kirish
+const NATIVE = window.AndroidApp || null;                  // APK ichidagi Android ko'prigi (barmoq izi, orqaga tugmasi)
+const BOT_NAME = 'Online_zakas_jizzax_bot';
+const tokenGet = () => { try { return localStorage.getItem('app_token') || ''; } catch (e) { return ''; } };
+const tokenSet = v => { try { v ? localStorage.setItem('app_token', v) : localStorage.removeItem('app_token'); } catch (e) {} };
 const ST = { new: ['🆕 Qabul qilindi', .08], collecting: ['📦 Yig\'ilmoqda', .35], on_way: ['🚚 Yo\'lda', .68], delivered: ['✅ Yetkazildi', 1] };
 const buzz = (t = 'light') => { try { tg && tg.HapticFeedback.impactOccurred(t); } catch (e) {} };
 
 async function api(path, opts = {}) {
   const headers = { 'X-Init-Data': tg ? tg.initData : '', ...(opts.headers || {}) };
   if (DEV) headers['X-Dev-User'] = DEV;
+  if (APP && tokenGet()) headers['X-App-Token'] = tokenGet();
   if (opts.json) { headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(opts.json); }
-  const r = await fetch(path, { ...opts, headers });
+  const isGet = !opts.method || opts.method === 'GET';
+  const tries = opts.retry != null ? opts.retry : (isGet ? 2 : 0);   // GET: server uyg'onguncha qayta urinadi
+  let r, lastErr;
+  for (let i = 0; i <= tries; i++) {
+    const ac = new AbortController(), tm = setTimeout(() => ac.abort(), opts.timeout || (isGet ? 30000 : 60000));
+    try {
+      r = await fetch(path, { ...opts, headers, signal: ac.signal });
+      clearTimeout(tm);
+      if (r.status >= 502 && r.status <= 504 && i < tries) { await sleep(1500 * (i + 1)); continue; }   // Render uyg'onmoqda
+      lastErr = null; break;
+    } catch (e) {
+      clearTimeout(tm);
+      lastErr = new Error(navigator.onLine === false ? "Internet yo'q. Aloqani tekshirib, qayta urining" : "Server javob bermadi. Qayta urinib ko'ring");
+      lastErr.network = true;
+      if (i < tries) await sleep(1500 * (i + 1));
+    }
+  }
+  if (lastErr) throw lastErr;
   const data = await r.json().catch(() => ({}));
+  if (r.status === 401 && APP) { tokenSet(''); loginView(); throw new Error('Qayta kiring'); }
   if (!r.ok) throw new Error(data.error || ('Xato ' + r.status));
   return data;
 }
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2300); }
+
+/* ================================================================== xatolarni kuzatish, internet holati */
+let _logN = 0;
+function clientLog(msg, at) { if (_logN++ > 20) return; try { fetch('/api/clientlog', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Init-Data': tg ? tg.initData : '', ...(APP && tokenGet() ? { 'X-App-Token': tokenGet() } : {}) }, body: JSON.stringify({ msg: String(msg).slice(0, 300), at: String(at || '').slice(0, 200) }) }).catch(() => {}); } catch (e) {} }
+window.addEventListener('error', e => clientLog(e.message, (e.filename || '') + ':' + (e.lineno || '')));
+window.addEventListener('unhandledrejection', e => clientLog('promise: ' + ((e.reason && e.reason.message) || e.reason), ''));
+function netBanner() { let b = document.getElementById('offline'); if (!b) { b = document.createElement('div'); b.id = 'offline'; b.textContent = "📡 Internet yo'q — zakas yuborish uchun aloqani tekshiring"; document.body.appendChild(b); } b.classList.toggle('show', navigator.onLine === false); }
+window.addEventListener('online', () => { netBanner(); toast('✅ Internet qaytdi'); });
+window.addEventListener('offline', netBanner);
 
 /* ================================================================== animatsiya yordamchilari */
 function animateIn(root) {                       // elementlar birin-ketin pastdan chiqadi
@@ -214,6 +247,7 @@ function setBack(fn) {
   tg.BackButton.offClick(onBack); if (fn) { tg.BackButton.show(); tg.BackButton.onClick(onBack); } else tg.BackButton.hide();
 }
 function onBack() { backFn && backFn(); }
+window.onAndroidBack = () => { const lk = document.getElementById('lock'); if (lk && !lk.classList.contains('hidden')) return false; if (backFn) { backFn(); return true; } return false; };
 const cartSum = () => Object.entries(S.cart).reduce((s, [id, q]) => { const p = S.products.find(p => p.id === id); return s + (p ? p.price * q : 0); }, 0);
 const cartCount = () => Object.keys(S.cart).length;
 let lastCart = '';
@@ -243,7 +277,7 @@ function setDock(name) {
   });
 }
 const redock = () => { const on = $('#dock button.on'); on && setDock(on.dataset.d); };
-$$('#dock button').forEach(b => b.onclick = () => { buzz(); const dk = $('#dock'); if (dk.classList.contains('mini')) { dk.classList.remove('mini'); redock(); return; } ({ home, new: newOrder, admin: adminView })[b.dataset.d](); });
+$$('#dock button').forEach(b => b.onclick = () => { buzz(); const dk = $('#dock'); if (dk.classList.contains('mini')) { dk.classList.remove('mini'); redock(); return; } ({ home, new: newOrder, admin: adminView, profile: profileView, notes: notesView })[b.dataset.d](); });
 // pastga aylantirilganda dock yig'iladi (faqat faol tugma qoladi), tepaga aylantirilsa yoki bosilsa ochiladi
 let lastY = 0; addEventListener('scroll', () => { const y = scrollY, d = y - lastY; lastY = y; const dk = $('#dock'); if (dk.classList.contains('hidden')) return; const m = dk.classList.contains('mini'); if (!m && d > 8 && y > 90) { dk.classList.add('mini'); redock(); } else if (m && d < -8) { dk.classList.remove('mini'); redock(); } }, { passive: true });
 addEventListener('resize', () => { const on = $('#dock button.on'); on && setDock(on.dataset.d); });
@@ -495,13 +529,19 @@ function confirmView() {
     $$('[data-p]').forEach(b => b.onclick = () => chg(b.dataset.p, S.cart[b.dataset.p] + stepOf(S.products.find(p => p.id === b.dataset.p))));
     $$('[data-i]').forEach(i => i.onchange = () => chg(i.dataset.i, i.value));
     $('#send').onclick = async () => {
-      $('#send').disabled = true;
+      if ($('#send').disabled) return;
+      $('#send').disabled = true; const txt = $('#send').textContent; $('#send').textContent = '⏳ Yuborilmoqda…';
       try {
+        let rid = LS.get('req_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('req_id', rid); }   // bitta zakas = bitta ID
         const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty, note: S.notes[id] || '' }));
-        const { order } = await api('/api/orders', { method: 'POST', json: { client_id: S.client.id, items, comment: $('#cm').value, ddate: window.__dd } });
-        S.cart = {}; S.notes = {}; saveCart(); S.client = null; buzz('heavy'); confetti(); toast('Zakas yuborildi ✅');
+        const local = items.reduce((s, it) => { const p = S.products.find(x => x.id === it.id); return s + (p ? p.price * it.qty : 0); }, 0);
+        const res = await api('/api/orders', { method: 'POST', retry: 3, json: { client_id: S.client.id, items, comment: $('#cm').value, ddate: window.__dd, req_id: rid } });
+        const order = res.order;
+        LS.set('req_id', null);
+        S.cart = {}; S.notes = {}; saveCart(); S.client = null; buzz('heavy'); confetti();
+        toast(res.duplicate ? 'Zakas avval yuborilgan edi ✅' : res.skipped ? `Zakas yuborildi ✅ (${res.skipped} ta mahsulot topilmadi)` : Math.round(local) !== Math.round(order.total) ? 'Zakas yuborildi ✅ Narx yangilangan: ' + money(order.total) : 'Zakas yuborildi ✅');
         S.tab = 'mine'; detail(order); banner && banner.setProgress(ST.new[1]);
-      } catch (e) { toast(e.message); $('#send').disabled = false; }
+      } catch (e) { toast(e.network ? e.message + ' — savat saqlangan' : e.message); $('#send').disabled = false; $('#send').textContent = txt; }
     };
   };
   draw();
@@ -512,10 +552,17 @@ async function loadUsers() {
   const box = $('#usr'); if (!box) return;
   try {
     const { items, agents } = await api('/api/users');
-    box.innerHTML = items.map(u => `<div style="display:flex;gap:8px;align-items:center;margin:6px 0"><div style="flex:1;min-width:0"><b>${esc(u.name)}</b>${u.admin ? ' 👑' : ''}<div class="mut" style="font-size:12px">${u.username ? '@' + esc(u.username) + ' · ' : ''}${u.tg_id}</div></div>
-      <select data-u="${u.tg_id}" style="max-width:48%"><option value="">🚫 Ruxsat yo'q</option>${agents.map(g => `<option ${u.agent === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>`).join('') || '<div class="mut">Hali hech kim kirmagan</div>';
+    box.innerHTML = items.map(u => `<div class="urow" style="padding:8px 0;border-bottom:1px solid #F0F1F5"><div style="display:flex;gap:8px;align-items:center"><div style="flex:1;min-width:0"><b>${esc(u.name)}</b>${u.admin ? ' 👑' : ''}<div class="mut" style="font-size:12px">${u.username ? '@' + esc(u.username) + ' · ' : ''}${u.tg_id}</div></div>
+      <select data-u="${u.tg_id}" style="max-width:48%"><option value="">🚫 Ruxsat yo'q</option>${agents.map(g => `<option ${u.agent === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span class="mut" style="flex:1;font-size:13px">📱 Ilova: ${u.login ? '<b style="color:var(--txt)">' + esc(u.login) + '</b>' : 'login berilmagan'}</span><button type="button" class="btn sec small" data-lg="${u.tg_id}">🔑 ${u.login ? 'Almashtirish' : 'Login berish'}</button></div>
+      <div class="lgf hidden" data-lf="${u.tg_id}" style="margin-top:6px;display:grid;gap:6px"><input placeholder="Login (lotincha, masalan samandar)" value="${esc(u.login || '')}" data-ll autocomplete="off" autocapitalize="off"><input placeholder="Parol (kamida 6 belgi)" data-lp autocomplete="new-password">
+      <div style="display:flex;gap:6px"><button type="button" class="btn small" data-ls="${u.tg_id}">Saqlash</button>${u.login ? `<button type="button" class="btn sec small" data-ld="${u.tg_id}">O'chirish</button>` : ''}</div></div></div>`).join('') || '<div class="mut">Hali hech kim kirmagan</div>';
     $('#nag').innerHTML = '<option value="">Agentni tanlang</option>' + agents.map(g => `<option>${esc(g)}</option>`).join('');
     $('#nadd').onclick = async () => { const id = $('#nid').value.replace(/\D/g, ''), ag = $('#nag').value; if (!id || !ag) return toast('ID va agentni kiriting'); try { await api('/api/users/' + id + '/access', { method: 'PUT', json: { agent: ag } }); toast('Qo\'shildi'); loadUsers(); } catch (e) { toast(e.message); } };
+    $$('[data-lg]', box).forEach(b => b.onclick = () => { const f = $(`[data-lf="${b.dataset.lg}"]`, box); f.classList.toggle('hidden'); if (!f.classList.contains('hidden')) { const p = $('[data-lp]', f); p.value = Math.random().toString(36).slice(2, 8); } });
+    const saveLogin = async (id, login, password) => { try { await api('/api/users/' + id + '/login', { method: 'PUT', json: { login, password } }); toast(login ? `✅ Saqlandi. Agentga yuboring: ${login} / ${password}` : 'Login o\'chirildi'); loadUsers(); } catch (e) { toast(e.message); } };
+    $$('[data-ls]', box).forEach(b => b.onclick = () => { const f = b.closest('.lgf'); saveLogin(b.dataset.ls, $('[data-ll]', f).value.trim(), $('[data-lp]', f).value); });
+    $$('[data-ld]', box).forEach(b => b.onclick = () => saveLogin(b.dataset.ld, '', ''));
     box.querySelectorAll('select').forEach(s => s.onchange = async () => { try { await api('/api/users/' + s.dataset.u + '/access', { method: 'PUT', json: { agent: s.value } }); toast(s.value ? 'Ruxsat berildi' : 'Ruxsat olib tashlandi'); } catch (e) { toast(e.message); } });
   } catch (e) { box.textContent = e.message; }
 }
@@ -574,8 +621,189 @@ function adminView() {
   apply();
 })();
 
+/* ================================================================== profil, sozlamalar, qulf */
+const SVG = {
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  finger: '<path d="M12 11v3a8 8 0 0 1-1.5 4.7"/><path d="M8.5 7.3A5 5 0 0 1 17 11v2.5"/><path d="M7 11a5 5 0 0 1 .3-1.7M17 17.5c-.3 1-.7 2-1.2 2.9"/><path d="M5 15.5a9 9 0 0 0 .5-4.5 6.5 6.5 0 0 1 11-4.7M3.5 9.5A9 9 0 0 1 12 3a9 9 0 0 1 8.5 6"/><path d="M14 11.5v2a10 10 0 0 1-1.8 5.5"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  text: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
+  chev: '<path d="m9 6 6 6-6 6"/>',
+};
+const svg = k => `<svg viewBox="0 0 24 24">${SVG[k]}</svg>`;
+const LS = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} } };
+const BIO = tg && tg.BiometricManager;
+let bioReady = false;
+let _bioCb = null;
+window.__bioResult = ok => { const c = _bioCb; _bioCb = null; c && c(!!ok); };
+const NBIO = NATIVE && NATIVE.canBiometric ? {            // APK: Android BiometricPrompt
+  isAccessGranted: true,
+  authenticate: (o, cb) => { _bioCb = cb; try { NATIVE.biometric(o.reason || 'Kirish'); } catch (e) { window.__bioResult(false); } },
+  requestAccess: (o, cb) => cb(true),
+} : null;
+function bioInit() { return new Promise(res => { if (NBIO) { let ok = false; try { ok = !!NATIVE.canBiometric(); } catch (e) {} return res(ok); } if (!BIO) return res(false); try { BIO.init(() => { bioReady = true; res(BIO.isBiometricAvailable); }); } catch (e) { res(false); } }); }
+async function sha(s) { try { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('mc:' + s)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); } catch (e) { return 'p' + s; } }
+const ask = m => new Promise(res => { try { if (tg && tg.showConfirm && tg.platform !== 'unknown') return tg.showConfirm(m, ok => res(!!ok)); } catch (e) {} res(confirm(m)); });
+const lockOn = () => !!(LS.get('pinh') || LS.get('bio') === '1');
+const initials = n => String(n || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'MC';
+
+function showLock(onOpen, mode = 'unlock', mandatory = false) {          // mode: unlock | set | confirm
+  const L = $('#lock'); let pin = '', first = '';
+  const title = { unlock: 'Salom, ' + esc(S.me ? S.me.name : ''), set: 'Yangi PIN kod', confirm: 'PIN kodni takrorlang' };
+  const sub = { unlock: LS.get("pinh") ? "Kirish kodingizni kiriting" + (LS.get('bio') === '1' ? " yoki barmoq izini qo'ying" : '') : "Barmoq izini qo'ying", set: '4 ta raqam kiriting', confirm: 'Xuddi shu 4 raqamni yana kiriting' };
+  if (mandatory) { title.set = "O'zingizga 4 xonali kod qo'ying"; sub.set = 'Keyingi safar ilovaga shu kod bilan kirasiz'; }
+  const draw = () => {
+    const showPad = mode !== 'unlock' || LS.get('pinh');
+    L.innerHTML = `<div class="lk-logo">mc</div><div class="lk-brand">MEATCITY · ONLINE ZAKAS</div>
+      <div class="lk-hi">${title[mode]}</div><div class="lk-sub">${sub[mode]}</div>
+      ${showPad ? `<div class="lk-dots">${[0, 1, 2, 3].map(i => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join('')}</div>` : '<div style="height:40px"></div>'}
+      <div class="lk-keys">${showPad ? [1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => `<button type="button" data-k="${k}">${k}</button>`).join('') : ''}
+        ${mode === 'unlock' && LS.get('bio') === '1' ? `<button type="button" class="lk-fp" aria-label="Barmoq izi">${svg('finger')}</button>` : '<span></span>'}
+        ${showPad ? `<button type="button" data-k="0">0</button><button type="button" class="lk-del" data-k="del">O'chirish</button>` : ''}</div>
+      ${mode === 'unlock' ? `<button type="button" id="lkForgot" style="margin-top:auto;border:0;background:none;color:var(--mut);font:inherit;font-size:14px">Kodni unutdingizmi?</button>` : mandatory ? '' : `<button type="button" id="lkCancel" style="margin-top:auto;border:0;background:none;color:var(--mut);font:inherit;font-size:15px;font-weight:700">Bekor qilish</button>`}`;
+    $$('[data-k]', L).forEach(b => b.onclick = () => key(b.dataset.k));
+    const fp = $('.lk-fp', L); if (fp) fp.onclick = bio;
+    const fg = $('#lkForgot'); if (fg) fg.onclick = async () => { if (await ask("PIN va barmoq izi o'chiriladi, ilova ochiladi. Davom etasizmi?")) { LS.set('pinh', null); LS.set('bio', null); if (APP) { tokenSet(''); L.classList.add('hidden'); return loginView(); } done(); } };
+    const cn = $('#lkCancel'); if (cn) cn.onclick = () => { L.classList.add('hidden'); onOpen && onOpen(false); };
+  };
+  const done = () => { L.classList.add('hidden'); buzz('medium'); onOpen && onOpen(true); };
+  const fail = () => { pin = ''; draw(); const d = $('.lk-dots', L); d && d.classList.add('err'); try { tg && tg.HapticFeedback.notificationOccurred('error'); } catch (e) {} };
+  async function key(k) {
+    buzz();
+    if (k === 'del') { pin = pin.slice(0, -1); return draw(); }
+    if (pin.length >= 4) return; pin += k; draw();
+    if (pin.length < 4) return;
+    await sleep(120);
+    if (mode === 'unlock') { (await sha(pin)) === LS.get('pinh') ? done() : fail(); }
+    else if (mode === 'set') { first = pin; pin = ''; mode = 'confirm'; draw(); }
+    else if (mode === 'confirm') { if (pin === first) { LS.set('pinh', await sha(pin)); toast("✅ PIN kod o'rnatildi"); done(); } else { mode = 'set'; first = ''; fail(); toast('PIN mos kelmadi, qaytadan'); } }
+  }
+  async function bio() {
+    if (!(await bioInit())) return toast("Bu telefonda barmoq izi mavjud emas");
+    (NBIO || BIO).authenticate({ reason: 'Online zakas ilovasiga kirish' }, ok => ok ? done() : toast('Barmoq izi tasdiqlanmadi'));
+  }
+  L.classList.remove('hidden'); draw();
+  if (mode === 'unlock' && LS.get('bio') === '1') setTimeout(bio, 350);
+}
+
+async function profileView() {
+  clearTimer(); setBack(home); updateCartBar(false); setDock('profile'); banner && banner.setProgress(null);
+  const me = S.me, big = document.body.classList.contains('big');
+  render(`
+    <div class="card pf-head" data-a><div class="pf-ava">${esc(initials(me.name))}</div><div class="pf-name">${esc(me.name)}</div>
+      <div class="mut">${me.admin ? 'Admin' : 'Savdo agenti'} · MeatCity Jizzax</div>
+      <div class="pf-stats"><div><b id="pfC">…</b><small>Mijoz</small></div><div><b id="pfT">…</b><small>Bugun zakas</small></div><div><b id="pfW">…</b><small>Hafta zakas</small></div></div></div>
+    <div class="sec-h" data-a>Kirish va xavfsizlik</div>
+    <div class="card pf-list" data-a>
+      <button type="button" class="pf-row" id="pfBio"><span class="pf-ic">${svg('finger')}</span><span class="t">Barmoq izi bilan kirish<small>Ilova ochilganda otpechatka so'raladi</small></span><span class="sw ${LS.get('bio') === '1' ? 'on' : ''}"></span></button>
+      <button type="button" class="pf-row" id="pfPin"><span class="pf-ic">${svg('lock')}</span><span class="t">${APP ? 'Kirish kodini almashtirish' : 'PIN kod'}<small>${APP ? '4 xonali kod' : LS.get('pinh') ? "O'rnatilgan · bosib o'chirish" : "4 xonali zaxira kod"}</small></span>${APP ? `<span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span>` : `<span class="sw ${LS.get('pinh') ? 'on' : ''}"></span>`}</button>
+    </div>
+    <div class="sec-h" data-a>Ko'rinish</div>
+    <div class="card pf-list" data-a>
+      <button type="button" class="pf-row" id="pfBig"><span class="pf-ic">${svg('text')}</span><span class="t">Katta yozuv<small>Yoshi kattalar uchun qulay</small></span><span class="sw ${big ? 'on' : ''}"></span></button>
+      <button type="button" class="pf-row" id="pfOrders"><span class="pf-ic">${svg('list')}</span><span class="t">Mening zakaslarim</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>
+      ${me.admin ? `<button type="button" class="pf-row" id="pfAdmin"><span class="pf-ic">${svg('gear')}</span><span class="t">Admin sozlamalari</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>` : ''}
+    </div>
+    <button type="button" class="pf-out" id="pfOut" data-a><span style="width:20px;height:20px;display:flex">${svg('logout')}</span> Profildan chiqish</button>
+    <div class="mut" style="text-align:center;font-size:12px;margin-top:8px" data-a>Telegram ID: ${me.id}</div>`);
+  $$('.pf-row svg, .pf-out svg').forEach(s => { s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '2'); s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round'); s.style.width = s.style.height = '20px'; });
+  $('#pfOrders').onclick = home;
+  if ($('#pfAdmin')) $('#pfAdmin').onclick = adminView;
+  $('#pfBig').onclick = () => { const on = !document.body.classList.contains('big'); document.body.classList.toggle('big', on); LS.set('big', on ? '1' : '0'); const b = $('#aa'); if (b) b.textContent = on ? 'Aa −' : 'Aa +'; buzz(); profileView(); };
+  $('#pfPin').onclick = () => {
+    if (APP) return showLock(() => { toast("✅ Kod almashtirildi"); profileView(); }, 'set');
+    if (LS.get('pinh')) { if (LS.get('bio') === '1') return toast("Avval barmoq izini o'chiring"); LS.set('pinh', null); toast("PIN kod o'chirildi"); return profileView(); }
+    showLock(() => profileView(), 'set');
+  };
+  $('#pfBio').onclick = async () => {
+    if (LS.get('bio') === '1') { LS.set('bio', null); toast("Barmoq izi o'chirildi"); return profileView(); }
+    if (!(await bioInit())) return toast("Bu telefonda barmoq izi mavjud emas yoki Telegram eski");
+    const go = () => (NBIO || BIO).authenticate({ reason: 'Barmoq izini tasdiqlang' }, ok => { if (ok) { LS.set('bio', '1'); toast('✅ Barmoq izi yoqildi'); if (!LS.get('pinh')) { toast("Zaxira uchun PIN kod ham o'rnating"); return showLock(() => profileView(), 'set'); } } profileView(); });
+    (NBIO || BIO).isAccessGranted ? go() : (NBIO || BIO).requestAccess({ reason: 'Online zakas ilovasiga barmoq izi bilan kirish' }, ok => ok ? go() : toast("Ruxsat berilmadi — Telegram sozlamalaridan yoqing"));
+  };
+  $('#pfOut').onclick = async () => {
+    if (!(await ask('Profildan chiqasizmi?' + (lockOn() ? '' : "\n(Qayta kirishni himoyalash uchun PIN yoki barmoq izini yoqing)")))) return;
+    if (lockOn()) { setDock(null); showLock(ok => ok && home()); }
+    else if (APP) { try { await api('/api/app/logout', { method: 'POST' }); } catch (e) {} tokenSet(''); loginView(); }
+    else if (tg && tg.close) tg.close(); else home();
+  };
+  try {
+    const [{ items }, regs] = await Promise.all([api('/api/orders?scope=mine'), api('/api/regions').catch(() => ({ items: [] }))]);
+    const d0 = new Date(); d0.setHours(0, 0, 0, 0); const w0 = d0.getTime() - 6 * 864e5;
+    $('#pfT').textContent = items.filter(o => o.created * 1000 >= d0.getTime()).length;
+    $('#pfW').textContent = items.filter(o => o.created * 1000 >= w0).length;
+    $('#pfC').textContent = me.admin ? me.clients : regs.items.reduce((s, r) => s + r.count, 0);
+  } catch (e) {}
+}
+
+/* ================================================================== bildirishnomalar */
+const NIC = { order: 'M12 5v14M5 12h14', status: 'M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8', printed: 'M6 9V3h12v6M3 9h18v8H3zM6 14h12v7H6z', delivered: 'm5 12 5 5 9-10', client: 'M12 8m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0M4 21a8 8 0 0 1 16 0', info: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9' };
+function setBadge(n) { const b = $('#nbadge'); if (!b) return; b.textContent = n > 9 ? '9+' : n; b.classList.toggle('hidden', !n); }
+async function pollNotes() { try { const { unread } = await api('/api/notes'); setBadge(unread); } catch (e) {} }
+const ago = t => { const s = Date.now() / 1000 - t; if (s < 60) return 'hozir'; if (s < 3600) return Math.floor(s / 60) + ' daq'; const d = new Date(t * 1000), td = new Date(); return d.toDateString() === td.toDateString() ? d.toLocaleTimeString('uz', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('uz', { day: '2-digit', month: '2-digit' }); };
+async function notesView() {
+  clearTimer(); setBack(home); updateCartBar(false); setDock('notes'); banner && banner.setProgress(null);
+  render(`<h2 class="sec-h" style="margin-top:4px" data-a>Bildirishnomalar</h2><div id="nl"><div class="sk"></div><div class="sk"></div></div>`);
+  try {
+    const { items } = await api('/api/notes');
+    $('#nl').innerHTML = items.length ? `<div class="card nlist">` + items.map(n => `<div class="nrow ${n.read ? '' : 'unread'}" ${n.order_id ? `data-o="${n.order_id}"` : ''}>
+      <span class="nic"><svg viewBox="0 0 24 24"><path d="${NIC[n.kind] || NIC.info}"/></svg></span>
+      <span class="nt"><span class="nh"><b>${esc(n.title)}</b><small>${ago(n.created)}</small></span>${n.body ? `<span class="mut">${esc(n.body)}</span>` : ''}</span></div>`).join('') + `</div>`
+      : `<div class="card" style="text-align:center;padding:30px 16px" data-a><b>Hozircha xabar yo'q</b><div class="mut" style="margin-top:6px">Zakas chop etilsa, yo'lga chiqsa yoki yetkazilsa shu yerda ko'rinadi.</div></div>`;
+    $$('#nl .nrow[data-o]').forEach(r => r.onclick = async () => { try { const { items: os } = await api('/api/orders?scope=mine'); const o = os.find(x => x.id == r.dataset.o); o && detail(o); } catch (e) {} });
+    if (items.some(n => !n.read)) { api('/api/notes/read', { method: 'POST' }).catch(() => {}); setBadge(0); }
+  } catch (e) { $('#nl').innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
+}
+setInterval(() => { if (S.me && S.me.allowed && !document.hidden) pollNotes(); }, 30000);
+
+/* ================================================================== APK: bot kodi bilan kirish */
+function loginView() {
+  setDock(null); updateCartBar(false); setBack(null);
+  const L = $('#lock');
+  L.innerHTML = `<div class="lk-logo">mc</div><div class="lk-brand">MEATCITY · ONLINE ZAKAS</div>
+    <div class="lk-hi">Ilovaga kirish</div><div class="lk-sub">Admin bergan login va parolni kiriting</div>
+    <form id="lgForm" style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;margin-top:18px">
+      <label class="mut" style="font-size:13px;font-weight:700">Login<input id="lgL" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" style="margin-top:4px;width:100%;box-sizing:border-box;height:52px;padding:0 14px;font-size:17px"></label>
+      <label class="mut" style="font-size:13px;font-weight:700">Parol<input id="lgP" type="password" autocomplete="current-password" style="margin-top:4px;width:100%;box-sizing:border-box;height:52px;padding:0 14px;font-size:17px"></label>
+      <button class="btn" type="submit" id="lgB" style="margin-top:6px">Kirish</button>
+      <div class="lk-sub" id="lgMsg" style="min-height:20px"></div>
+    </form>
+    <div class="lk-sub" style="margin-top:auto;font-size:13px">Login yo'qmi? Adminga murojaat qiling</div>`;
+  L.classList.remove('hidden');
+  $('#lgForm').onsubmit = async e => {
+    e.preventDefault();
+    const login = $('#lgL').value.trim(), password = $('#lgP').value;
+    if (!login || !password) return $('#lgMsg').textContent = 'Login va parolni kiriting';
+    $('#lgB').disabled = true; $('#lgMsg').textContent = 'Tekshirilmoqda…';
+    try {
+      const r = await fetch('/app/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login, password, device: navigator.userAgent.slice(0, 80) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Xato');
+      tokenSet(d.token); LS.set('pinh', null); LS.set('bio', null);
+      firstSetup();
+    } catch (er) { $('#lgMsg').textContent = '❌ ' + er.message; $('#lgB').disabled = false; }
+  };
+}
+function firstSetup() {                          // birinchi kirish: o'z kodini qo'yadi, keyin barmoq izi (bo'lsa)
+  showLock(async () => {
+    if (await bioInit()) {
+      if (await ask("Barmoq izi bilan kirishni yoqasizmi?\nKeyingi safar kod o'rniga otpechatka qo'yasiz.")) {
+        const B = NBIO || BIO;
+        const go = () => B.authenticate({ reason: 'Barmoq izini tasdiqlang' }, ok => { if (ok) { LS.set('bio', '1'); toast('✅ Barmoq izi yoqildi'); } unlocked = true; start(); });
+        return B.isAccessGranted ? go() : B.requestAccess({ reason: 'Online zakas ilovasiga barmoq izi bilan kirish' }, ok => { if (ok) return go(); unlocked = true; start(); });
+      }
+    }
+    unlocked = true; start();
+  }, 'set', true);
+}
+
 /* ================================================================== start */
-(async () => {
+let unlocked = false;
+async function start() {
+  if (APP && !tokenGet()) return loginView();
+  if (APP && !LS.get('pinh')) return firstSetup();
   try {
     S.me = await api('/api/me');
     $('#hello').textContent = 'Salom, ' + S.me.name;
@@ -587,8 +815,10 @@ function adminView() {
       return;
     }
     api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
-    home();
+    if (lockOn() && !unlocked) showLock(ok => { if (ok) { unlocked = true; home(); } }); else home();
+    pollNotes();
   } catch (e) {
     render(`<div class="card" data-a>Kirish xatosi: ${esc(e.message)}<div class="mut" style="margin-top:6px">Ilovani Telegram ichidan oching.</div></div>`);
   }
-})();
+}
+start();
