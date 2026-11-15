@@ -356,7 +356,7 @@ function detail(o) {
 /* ================================================================== 1) mijoz */
 async function newOrder() {
   if (S.me.role === 'sklad') return retNew();
-  useMode('order'); if (S.prodAgent) { S.prodAgent = ''; S.products = []; }
+  useMode('order');
   clearTimer(); setBack(home); updateCartBar(false); setDock('new'); banner && banner.setProgress(null);
   S.region = S.me.admin ? (S.me.region || '') : (S.me.agent || ''); let agents = [];
   try { agents = (await api('/api/regions')).items; } catch (e) {}
@@ -425,11 +425,11 @@ async function newOrder() {
 
 /* ================================================================== 2) mahsulotlar */
 async function pickProducts() {
-  const R = RET(), purl = R ? '/api/products?agent=' + encodeURIComponent(S.ret.agent) : '/api/products';
+  const R = RET(), pag = R ? S.ret.agent : ((S.client && S.client.agent) || ''), purl = '/api/products' + (pag ? '?agent=' + encodeURIComponent(pag) : '');
   setBack(R ? retNew : newOrder); setDock(null);
-  if (!S.products.length || (R && S.prodAgent !== S.ret.agent)) {
+  if (!S.products.length || S.prodAgent !== pag) {                 // narxlar agent narx turi bo'yicha (agent almashsa qayta olinadi)
     render('<div class="grid">' + '<div class="sk" style="height:220px;border-radius:22px"></div>'.repeat(4) + '</div>');
-    try { const r = await api(purl); S.products = r.items; if (R) { S.prodAgent = S.ret.agent; S.ret.ptype = r.ptype || ''; } } catch (e) { toast(e.message); return; }
+    try { const r = await api(purl); S.products = r.items; S.prodAgent = pag; if (R) S.ret.ptype = r.ptype || ''; } catch (e) { toast(e.message); return; }
   } else api(purl).then(r => { S.products = r.items; }).catch(() => {});
   const cats = ['Hammasi', ...new Set(S.products.map(p => p.category))];
   render(`

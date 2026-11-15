@@ -1009,7 +1009,9 @@ async def h_me_put(request):
 async def h_products(request):
     items = await get_products(force=request.query.get("force") == "1" and request["admin"])
     ag = request.query.get("agent", "").strip()
-    if ag and request["role"] in ("admin", "sklad"):         # vozvrat: agentning narx turi bo'yicha narxlar
+    if request["role"] == "agent":                           # agent: doim o'z narx turi (Jarvis'da biriktirilgan)
+        ag = request["agent"]
+    if ag and request["role"] in ("admin", "sklad", "agent"):   # agent narx turi bo'yicha narxlar (zakas va vozvrat)
         ptype, prices = agent_price_map(ag)
         items = [{**p, "price": prices.get(p["id"], p["price"])} for p in items]
         return web.json_response({"items": annotate(items), "ptype": ptype, "t": _cache["t"]})
@@ -1294,12 +1296,14 @@ async def h_order_create(request):
     if not request["admin"] and client["agent"] != request["agent"]:
         return web.json_response({"error": "Bu mijoz sizning bazangizda emas"}, status=403)
     catalog = {p["id"]: p for p in annotate(await get_products())}
+    _, aprices = agent_price_map(client["agent"])               # mijoz agentining narx turi (bo'lmasa asosiy narx)
     items, total = [], 0.0
     for it in b.get("items", []):
         p = catalog.get(str(it.get("id")))
         qty = _num(it.get("qty"))
         if not p or not (0 < qty <= MAX_QTY):
             continue
+        p = {**p, "price": aprices.get(p["id"], p["price"])}
         stk = p["stock"]
         items.append({"id": p["id"], "name": p["name"], "price": p["price"], "qty": qty,
                       "unit": it.get("unit") if it.get("unit") in ("kg", "dona") else p["unit"],   # agent tanlagan birlik
