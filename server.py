@@ -1969,6 +1969,18 @@ async def h_j_otk_resend(request):
 ROLE_OF = {"agent": None, "sklad": SKLAD, "admin": ADMIN_ROLE}
 
 
+def agent_find(x: str):
+    """SD agent nomini topadi: qavs ichidagisiz, so'zlar bo'yicha (kirill/lotin farqi yo'q).
+    "Samandar", "Хусанов Самандар", "Хусанов Самандар ( Шахар )" — hammasi bitta agent."""
+    def key(v):
+        return set(w for w in translit(re.sub(r"\(.*?\)", " ", str(v or ""))).split() if len(w) > 1)
+    kx = key(x)
+    if not kx:
+        return None
+    hits = [a for a in ret_agents() if norm(a) == norm(x)] or [a for a in ret_agents() if kx <= key(a) or (key(a) and key(a) <= kx)]
+    return hits[0] if len(hits) == 1 or (hits and norm(hits[0]) == norm(x)) else (hits[0] if hits else None)
+
+
 def _staff_row(login):
     return db.execute("SELECT l.login, l.tg_id, u.name, u.username AS phone, u.last_seen, a.agent "
                       "FROM app_logins l LEFT JOIN users u ON u.tg_id=l.tg_id LEFT JOIN access a ON a.tg_id=l.tg_id WHERE l.login=?", (login,)).fetchone()
@@ -2000,10 +2012,10 @@ async def h_j_staff_save(request):
         return web.json_response({"error": "Rol: agent, sklad yoki admin"}, status=400)
     agent = str(b.get("agent", "")).strip()
     if role == "agent":
-        match = [a for a in ret_agents() if norm(a) == norm(agent)] or [a for a in ret_agents() if agent and translit(agent) in translit(a)]
+        match = agent_find(agent)
         if not match:
-            return web.json_response({"error": "Agent rolida SD agent tanlanishi kerak", "agents": ret_agents()}, status=400)
-        agent = match[0]
+            return web.json_response({"error": f"SD agent «{agent or '—'}» MC Xodim'da topilmadi. Bor agentlar: " + ", ".join(ret_agents()), "agents": ret_agents()}, status=400)
+        agent = match
     pw = str(b.get("password", ""))
     ph = str(b.get("pw_hash", "")).strip().lower()          # Jarvis'dagi PBKDF2 xeshi (parol ochiq yuborilmaydi)
     if ph and not re.fullmatch(r"[0-9a-f]{16,128}\$[0-9a-f]{64}", ph):
