@@ -49,6 +49,7 @@ SD_AGENTS = [x.strip() for x in os.getenv("SD_AGENTS", "Хусанов Сама�
 SD_INTERVAL = int(os.getenv("SD_INTERVAL", "600"))          # soniya
 ADMIN_ROLE = "@admin"                                       # access.agent: Jarvis'dan berilgan admin roli
 SKLAD = "@sklad"                                            # access.agent qiymati: skladchi roli (vozvrat kiritadi)
+EKSP = "@eksp"                                              # access.agent qiymati: ekspeditor (otkaz + qarzdorlar)
 STATUSES = ["new", "collecting", "on_way", "delivered"]
 STATUS_TEXT = {
     "new": "🆕 Qabul qilindi",
@@ -648,8 +649,8 @@ async def auth_mw(request: web.Request, handler):
         request["admin"] = user["id"] in ADMIN_IDS or bool(acc and acc["agent"] == ADMIN_ROLE)   # Jarvis'da "admin" roli berilgan xodim ham
         request["agent"] = acc["agent"] if acc and acc["agent"] != ADMIN_ROLE else ""
         request["allowed"] = request["admin"] or bool(acc)
-        request["role"] = "admin" if request["admin"] else ("sklad" if request["agent"] == SKLAD else ("agent" if acc else ""))
-        if request["agent"] == SKLAD:              # skladchi: agent emas — mijoz bazasi va zakaslar unga yopiq
+        request["role"] = "admin" if request["admin"] else ("sklad" if request["agent"] == SKLAD else ("eksp" if request["agent"] == EKSP else ("agent" if acc else "")))
+        if request["agent"] in (SKLAD, EKSP):              # skladchi: agent emas — mijoz bazasi va zakaslar unga yopiq
             request["agent"] = ""
         # zakas guruhida va ilovada ko'rinadigan ism: agent bo'lsa — Sales Doctor'dagi agent nomi
         request["uname"] = request["agent"] or name
@@ -1162,7 +1163,7 @@ async def h_regions(request):
 
 
 async def h_clients(request):
-    if request["role"] == "sklad":
+    if request["role"] in ("sklad", "eksp"):
         return web.json_response({"items": []})
     region = request.query.get("region", "").strip()
     if not request["admin"]:                      # agentga faqat o'z mijozlari (so'rovdagi filtr e'tiborga olinmaydi)
@@ -1284,8 +1285,8 @@ MAX_QTY = 100000
 
 
 async def h_order_create(request):
-    if request["role"] == "sklad":
-        return web.json_response({"error": "Skladchi zakas bera olmaydi"}, status=403)
+    if request["role"] in ("sklad", "eksp"):
+        return web.json_response({"error": "Bu rol zakas bera olmaydi"}, status=403)
     b = await request.json()
     req_id = re.sub(r"[^\w-]", "", str(b.get("req_id", "")))[:64]
     if req_id:   # internet uzilib qayta yuborilsa yoki ikki marta bosilsa — o'sha zakasni qaytaramiz, yangisini ochmaymiz
@@ -1557,6 +1558,8 @@ async def h_ret_create(request):
 
 async def h_ret_list(request):
     sql, args = "SELECT * FROM returns", []
+    if request["role"] == "eksp":
+        return web.json_response({"items": []})
     if request["role"] == "sklad":
         sql += " WHERE tg_id=?"
         args.append(request["uid"])
@@ -1902,8 +1905,8 @@ async def send_otkaz(o: dict) -> str:
 
 
 async def h_otk_create(request):
-    if request["role"] not in ("admin", "sklad"):
-        return web.json_response({"error": "Otkazni faqat skladchi kiritadi"}, status=403)
+    if request["role"] not in ("admin", "sklad", "eksp"):
+        return web.json_response({"error": "Otkazni faqat skladchi yoki ekspeditor kiritadi"}, status=403)
     b = await request.json()
     req_id = re.sub(r"[^\w-]", "", str(b.get("req_id", "")))[:64]
     if req_id:
@@ -1933,10 +1936,10 @@ async def h_otk_create(request):
 
 
 async def h_otk_list(request):
-    if request["role"] not in ("admin", "sklad"):
+    if request["role"] not in ("admin", "sklad", "eksp"):
         return web.json_response({"items": []})
     sql, args = "SELECT * FROM otkaz", []
-    if request["role"] == "sklad":
+    if request["role"] in ("sklad", "eksp"):
         sql += " WHERE tg_id=?"
         args.append(request["uid"])
     return web.json_response({"items": [row_otk(r) for r in db.execute(sql + " ORDER BY id DESC LIMIT 150", args).fetchall()]})
@@ -1966,7 +1969,7 @@ async def h_j_otk_resend(request):
 
 
 # ---------------------------------------------------------------- XODIMLAR (login/parol Jarvis'dagi "Foydalanuvchilar" bo'limidan)
-ROLE_OF = {"agent": None, "sklad": SKLAD, "admin": ADMIN_ROLE}
+ROLE_OF = {"agent": None, "sklad": SKLAD, "eksp": EKSP, "admin": ADMIN_ROLE}
 
 
 def agent_find(x: str):
@@ -1988,7 +1991,7 @@ def _staff_row(login):
 
 def _staff_out(r):
     acc = r["agent"] or ""
-    role = "sklad" if acc == SKLAD else "admin" if acc == ADMIN_ROLE or r["tg_id"] in ADMIN_IDS else "agent" if acc else ""
+    role = "sklad" if acc == SKLAD else "eksp" if acc == EKSP else "admin" if acc == ADMIN_ROLE or r["tg_id"] in ADMIN_IDS else "agent" if acc else ""
     return {"login": r["login"], "name": r["name"] or "", "phone": r["phone"] or "", "role": role,
             "agent": acc if role == "agent" else "", "active": bool(acc) or r["tg_id"] in ADMIN_IDS,
             "last_seen": r["last_seen"] or 0, "telegram": r["tg_id"] > 0}
@@ -2009,7 +2012,7 @@ async def h_j_staff_save(request):
         return web.json_response({"error": "Login: 3-40 belgi (harf, raqam, . - _ @)"}, status=400)
     role = str(b.get("role", "agent")).strip().lower()
     if role not in ROLE_OF:
-        return web.json_response({"error": "Rol: agent, sklad yoki admin"}, status=400)
+        return web.json_response({"error": "Rol: agent, sklad, eksp yoki admin"}, status=400)
     agent = str(b.get("agent", "")).strip()
     if role == "agent":
         match = agent_find(agent)
@@ -2101,6 +2104,21 @@ async def h_agent_balances(request):
     debt = sum(-(r["balance"] or 0) for r in rows if (r["balance"] or 0) < 0)
     return web.json_response({"items": rows, "debt": debt, "n_debt": sum(1 for r in rows if (r["balance"] or 0) < 0),
                               "t": int(kv_get("bal_t") or 0)})
+
+
+async def h_debtors(request):
+    """Ekspeditor (va admin): barcha agentlar mijozlaridan qarzdorlar ro'yxati (Jarvis'dan har 10 daq. yangilanadi)."""
+    if request["role"] not in ("admin", "eksp"):
+        return web.json_response({"error": "Faqat ekspeditor uchun"}, status=403)
+    rows = [dict(r) for r in db.execute("SELECT id,ext_id,name,region,address,phone,agent,balance FROM clients "
+                                        "WHERE COALESCE(balance,0)<0 ORDER BY balance, name")]
+    by = {}
+    for r in rows:
+        a = by.setdefault(r["agent"] or "—", {"agent": r["agent"] or "—", "n": 0, "debt": 0})
+        a["n"] += 1
+        a["debt"] += -(r["balance"] or 0)
+    return web.json_response({"items": rows, "debt": sum(-(r["balance"] or 0) for r in rows), "n_debt": len(rows),
+                              "agents": sorted(by.values(), key=lambda x: -x["debt"]), "t": int(kv_get("bal_t") or 0)})
 
 
 async def h_agent_stats(request):
@@ -2246,6 +2264,7 @@ def make_app():
         web.post("/jarvis/balances", h_j_balances),
         web.post("/jarvis/agent_stats", h_j_agent_stats),
         web.get("/api/agent/balances", h_agent_balances),
+        web.get("/api/debtors", h_debtors),
         web.get("/api/agent/stats", h_agent_stats),
         web.post("/jarvis/staff", h_j_staff_save),
         web.post("/jarvis/staff/delete", h_j_staff_delete),

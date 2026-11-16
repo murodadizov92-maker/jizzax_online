@@ -294,7 +294,7 @@ function setDock(name) {
   });
 }
 const redock = () => { const on = $('#dock button.on'); on && setDock(on.dataset.d); };
-$$('#dock button').forEach(b => b.onclick = () => { buzz(); const dk = $('#dock'); if (dk.classList.contains('mini')) { dk.classList.remove('mini'); redock(); return; } (S.me && S.me.role === 'sklad' ? { home: retHome, new: retNew, profile: profileView, notes: notesView } : { home, new: newOrder, admin: adminView, profile: profileView, notes: notesView })[b.dataset.d](); });
+$$('#dock button').forEach(b => b.onclick = () => { buzz(); const dk = $('#dock'); if (dk.classList.contains('mini')) { dk.classList.remove('mini'); redock(); return; } (S.me && S.me.role === 'sklad' ? { home: retHome, new: retNew, profile: profileView, notes: notesView } : S.me && S.me.role === 'eksp' ? { home: ekspHome, new: otkNew, profile: profileView, notes: notesView } : { home, new: newOrder, admin: adminView, profile: profileView, notes: notesView })[b.dataset.d](); });
 // pastga aylantirilganda dock yig'iladi (faqat faol tugma qoladi), tepaga aylantirilsa yoki bosilsa ochiladi
 let lastY = 0; addEventListener('scroll', () => { const y = scrollY, d = y - lastY; lastY = y; const dk = $('#dock'); if (dk.classList.contains('hidden')) return; const m = dk.classList.contains('mini'); if (!m && d > 8 && y > 90) { dk.classList.add('mini'); redock(); } else if (m && d < -8) { dk.classList.remove('mini'); redock(); } }, { passive: true });
 addEventListener('resize', () => { const on = $('#dock button.on'); on && setDock(on.dataset.d); });
@@ -306,6 +306,7 @@ function paintTabsPill() {
 }
 async function home() {
   if (S.me.role === 'sklad') return retHome();
+  if (S.me.role === 'eksp') return ekspHome();
   clearTimer(); setBack(null); updateCartBar(false); setDock('home'); banner && banner.setProgress(null);
   render(`
     <div class="stats" data-a>
@@ -381,6 +382,7 @@ function detail(o) {
 /* ================================================================== 1) mijoz */
 async function newOrder() {
   if (S.me.role === 'sklad') return retNew();
+  if (S.me.role === 'eksp') return otkNew();
   useMode('order');
   clearTimer(); setBack(home); updateCartBar(false); setDock('new'); banner && banner.setProgress(null);
   S.region = S.me.admin ? (S.me.region || '') : (S.me.agent || ''); let agents = [];
@@ -687,8 +689,59 @@ async function retHome() {
   await load(); S.timer = setInterval(load, 25000);
 }
 
+/* ================================================================== EKSPEDITOR: otkaz + qarzdorlar */
+const otkBack = () => S.me && S.me.role === 'eksp' ? ekspHome() : retHome();
+const tmS = t => new Date(t * 1000).toLocaleString('uz', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+async function ekspHome() {
+  clearTimer(); setBack(null); updateCartBar(false); setDock('home'); banner && banner.setProgress(null);
+  render(`
+    <div class="sk2" data-a><button class="btn otkbtn" id="onew">🚫 Otkaz zakas</button><button class="btn debtbtn" id="dbt">💰 Qarzdorlar</button></div>
+    <div id="dsum" data-a></div>
+    <h3 class="vt2" data-a>🚫 Mening otkazlarim</h3>
+    <div id="list"><div class="sk"></div><div class="sk"></div></div>`);
+  $('#onew').onclick = otkNew; $('#dbt').onclick = () => { buzz(); debtView(); };
+  api('/api/debtors').then(r => { const b = $('#dsum'); if (!b) return;
+    b.innerHTML = `<div class="card balsum click"><small>Mijozlarning umumiy qarzi</small><b>${money(r.debt)} so'm</b><span>${r.n_debt} ta mijoz qarzdor · ${agoAgo(r.t)}</span></div>`;
+    b.firstChild.onclick = () => debtView(); }).catch(() => {});
+  let sig = '';
+  const load = async () => {
+    try {
+      const { items } = await api('/api/otkaz');
+      const ns = JSON.stringify(items.map(o => [o.id, o.sent])); if (ns === sig) return; sig = ns;
+      $('#list').innerHTML = items.length ? items.map(o => `
+        <div class="card rise otkcard">
+          <div class="row"><b>🚫 Zakas № ${esc(o.order_no)}</b><span class="badge ${o.sent ? 's-delivered' : 's-new'}">${o.sent ? '✅ Guruhga ketdi' : '📋 Saqlandi'}</span></div>
+          <div class="mut">🏪 ${esc(o.client_name)} · ${tmS(o.created)} · 📷 ${o.photos.length}</div>
+          ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}
+        </div>`).join('') : '<div class="mut" style="text-align:center;padding:30px">Hali otkaz kiritilmagan</div>';
+    } catch (e) { $('#list').innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
+  };
+  await load(); S.timer = setInterval(load, 25000);
+}
+async function debtView() {
+  clearTimer(); setBack(otkBack); setDock(null); updateCartBar(false);
+  render(`<h2 class="vt" data-a>💰 Qarzdorlar</h2><div id="bsum" data-a></div>
+    <input id="bq" placeholder="🔍 Mijoz, manzil yoki telefon" data-a>
+    <div class="chips" id="dag" data-a style="flex-wrap:wrap;margin-top:8px"></div>
+    <div id="bl"><div class="sk"></div><div class="sk"></div></div>`);
+  let r, ag = '';
+  try { r = await api('/api/debtors'); } catch (e) { $('#bl').innerHTML = `<div class="mut">${esc(e.message)}</div>`; return; }
+  const draw = () => {
+    const q = $('#bq').value.trim().toLowerCase();
+    const L = r.items.filter(c => (!ag || (c.agent || '—') === ag) && (!q || [c.name, c.region, c.address, c.phone, c.ext_id].join(' ').toLowerCase().includes(q)));
+    const sum = L.reduce((s, c) => s - (c.balance || 0), 0);
+    $('#bsum').innerHTML = `<div class="card balsum"><small>${ag ? esc(ag) + ' mijozlari' : 'Hamma agentlar'} · qarz</small><b>${money(sum)} so'm</b><span>${L.length} ta mijoz · ${agoAgo(r.t)}</span></div>`;
+    $('#dag').innerHTML = [`<button class="chip ${!ag ? 'on' : ''}" data-g="">Hammasi</button>`, ...r.agents.map(a => `<button class="chip ${ag === a.agent ? 'on' : ''}" data-g="${esc(a.agent)}">${esc(a.agent.replace(/\s*\(.*?\)\s*/g, ' ').trim())} · ${a.n}</button>`)].join('');
+    $$('#dag [data-g]').forEach(b => b.onclick = () => { ag = b.dataset.g; buzz(); draw(); });
+    $('#bl').innerHTML = L.map(c => `<div class="card strow"><div><b>${esc(c.name)}</b><div class="mut">${esc([c.region, c.address].filter(Boolean).join(' · '))}</div>
+      <div class="mut" style="font-size:12px">🧑‍💼 ${esc(c.agent || '—')}${c.phone ? ` · <a href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}" style="color:inherit">📞 ${esc(c.phone)}</a>` : ''}</div></div>
+      <span class="bal neg">−${money(Math.abs(c.balance || 0))}</span></div>`).join('') || '<div class="mut" style="padding:20px;text-align:center">Qarzdor topilmadi</div>';
+  };
+  $('#bq').oninput = draw; draw();
+}
+
 async function otkNew() {                          // otkaz zakas: mijoz + zakas raqami + mahsulot rasmlari
-  clearTimer(); setBack(retHome); updateCartBar(false); setDock(null);
+  clearTimer(); setBack(otkBack); updateCartBar(false); setDock(S.me.role === 'eksp' ? 'new' : null);
   const O = S.otk = S.otk || { client: '', no: '', photos: [], comment: '' };
   const draw = () => {
     render(`
@@ -717,7 +770,7 @@ async function otkNew() {                          // otkaz zakas: mijoz + zakas
         let rid = LS.get('oreq_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('oreq_id', rid); }
         const r = await api('/api/otkaz', { method: 'POST', retry: 2, timeout: 120000, json: { client_name: O.client, order_no: O.no, photos: O.photos, comment: O.comment, req_id: rid } });
         LS.set('oreq_id', null); S.otk = null; buzz('heavy'); confetti();
-        toast(r.warn ? '✅ Saqlandi (guruhga ketmadi: ' + r.warn + ')' : '✅ Otkaz guruhga yuborildi'); S.stab = 'otk'; retHome();
+        toast(r.warn ? '✅ Saqlandi (guruhga ketmadi: ' + r.warn + ')' : '✅ Otkaz guruhga yuborildi'); S.stab = 'otk'; otkBack();
       } catch (e) { toast(e.message); b.disabled = false; b.textContent = '🚫 Otkazni yuborish'; }
     };
   };
@@ -964,11 +1017,11 @@ function showLock(onOpen, mode = 'unlock', mandatory = false) {          // mode
 
 async function profileView() {
   clearTimer(); setBack(home); updateCartBar(false); setDock('profile'); banner && banner.setProgress(null);
-  const me = S.me, big = document.body.classList.contains('big'), SK = me.role === 'sklad';
+  const me = S.me, big = document.body.classList.contains('big'), SK = me.role === 'sklad', EK = me.role === 'eksp';
   render(`
     <div class="card pf-head" data-a><div class="pf-ava">${esc(initials(me.name))}</div><div class="pf-name">${esc(me.name)}</div>
-      <div class="mut">${SK ? '📦 Skladchi' : me.admin ? 'Admin' : 'Savdo agenti' + (me.agent ? ' · ' + esc(me.agent) : '')} · MeatCity Jizzax</div>
-      <div class="pf-stats">${SK ? `<div><b id="pfT">…</b><small>Bugun vozvrat</small></div><div><b id="pfW">…</b><small>Tasdiq kutmoqda</small></div><div><b id="pfC">…</b><small>Bugun otkaz</small></div>`
+      <div class="mut">${SK ? '📦 Skladchi' : EK ? '🚚 Ekspeditor' : me.admin ? 'Admin' : 'Savdo agenti' + (me.agent ? ' · ' + esc(me.agent) : '')} · MeatCity Jizzax</div>
+      <div class="pf-stats">${EK ? `<div><b id="pfT">…</b><small>Bugun otkaz</small></div><div><b id="pfW">…</b><small>Qarzdor</small></div><div><b id="pfC">…</b><small>Jami otkaz</small></div>` : SK ? `<div><b id="pfT">…</b><small>Bugun vozvrat</small></div><div><b id="pfW">…</b><small>Tasdiq kutmoqda</small></div><div><b id="pfC">…</b><small>Bugun otkaz</small></div>`
         : `<div><b id="pfC">…</b><small>Mijoz</small></div><div><b id="pfT">…</b><small>Bugun zakas</small></div><div><b id="pfW">…</b><small>Hafta zakas</small></div>`}</div></div>
     <div class="sec-h" data-a>Kirish va xavfsizlik</div>
     <div class="card pf-list" data-a>
@@ -978,7 +1031,7 @@ async function profileView() {
     <div class="sec-h" data-a>Ko'rinish</div>
     <div class="card pf-list" data-a>
       <button type="button" class="pf-row" id="pfBig"><span class="pf-ic">${svg('text')}</span><span class="t">Katta yozuv<small>Yoshi kattalar uchun qulay</small></span><span class="sw ${big ? 'on' : ''}"></span></button>
-      <button type="button" class="pf-row" id="pfOrders"><span class="pf-ic">${svg('list')}</span><span class="t">${SK ? 'Vozvrat va otkazlarim' : 'Mening zakaslarim'}</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>
+      <button type="button" class="pf-row" id="pfOrders"><span class="pf-ic">${svg('list')}</span><span class="t">${SK ? 'Vozvrat va otkazlarim' : EK ? 'Otkazlarim' : 'Mening zakaslarim'}</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>
       ${me.admin ? `<button type="button" class="pf-row" id="pfAdmin"><span class="pf-ic">${svg('gear')}</span><span class="t">Admin sozlamalari</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>` : ''}
     </div>
     <button type="button" class="pf-out" id="pfOut" data-a><span style="width:20px;height:20px;display:flex">${svg('logout')}</span> Profildan chiqish</button>
@@ -1006,6 +1059,14 @@ async function profileView() {
     if (APP) { tokenSet(''); setDock(null); return loginView(); }
     if (tg && tg.close) tg.close(); else home();
   };
+  if (EK) {
+    try {
+      const [o, d] = await Promise.all([api('/api/otkaz'), api('/api/debtors')]);
+      const d0 = new Date(); d0.setHours(0, 0, 0, 0); const t0 = d0.getTime() / 1000;
+      $('#pfT').textContent = o.items.filter(x => x.created >= t0).length; $('#pfW').textContent = d.n_debt; $('#pfC').textContent = o.items.length;
+    } catch (e) {}
+    return;
+  }
   if (SK) {                                          // skladchi: o'z ko'rsatkichlari
     try {
       const [r, o] = await Promise.all([api('/api/returns'), api('/api/otkaz')]);
@@ -1101,7 +1162,8 @@ async function start() {
         <div class="card" style="margin-top:14px"><b>🔒 Zakas bo'limi faqat savdo agentlari uchun</b><div class="mut" style="margin-top:6px">Ruxsat olish uchun ID raqamingizni adminga yuboring:</div><div style="font-size:24px;font-weight:800;margin-top:6px">${S.me.id}</div></div></div>`);
       return;
     }
-    if (S.me.role !== 'sklad') api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
+    if (S.me.role === 'eksp') { const d = $('#dock [data-d="new"] span'); if (d) d.textContent = 'Otkaz'; const h = $('#dock [data-d="home"] span'); if (h) h.textContent = 'Bosh'; $('#hello').textContent = '🚚 ' + S.me.name; }
+    if (S.me.role !== 'sklad' && S.me.role !== 'eksp') api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
     if (S.me.role === 'sklad') { useMode('ret'); const d = $('#dock [data-d="new"] span'); if (d) d.textContent = 'Vozvrat'; const h = $('#dock [data-d="home"] span'); if (h) h.textContent = 'Ro\'yxat'; $('#hello').textContent = '📦 Sklad · ' + S.me.name; }
     if (lockOn() && !unlocked) showLock(ok => { if (ok) { unlocked = true; playVid().then(home); } }); else playVid().then(home);
     pollNotes();

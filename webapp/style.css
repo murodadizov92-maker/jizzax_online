@@ -560,3 +560,4 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 .remrow .rk{flex:none;font-size:12.5px;font-weight:800;color:#B54708;background:#FFF1E0;border-radius:10px;padding:5px 9px}
 .remrow.none .rk{color:#D92D20;background:#FEE4E2}
 #stc{display:flex;gap:8px;overflow-x:auto;margin:10px 0;padding-bottom:4px}
+.btn.debtbtn{background:linear-gradient(135deg,#12B886,#087F5B)!important;box-shadow:0 12px 26px rgba(8,127,91,.32)!important}
