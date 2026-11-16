@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS app_logins(login TEXT PRIMARY KEY, pw TEXT, tg_id INT
 CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, kind TEXT, title TEXT, body TEXT, order_id INTEGER, created INTEGER, read INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(tg_id, id);
 CREATE TABLE IF NOT EXISTS access(tg_id INTEGER PRIMARY KEY, agent TEXT NOT NULL, added INTEGER);
+CREATE TABLE IF NOT EXISTS mc_sections(login TEXT PRIMARY KEY, secs TEXT);
 CREATE TABLE IF NOT EXISTS returns(
   id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT, agent TEXT, ptype TEXT DEFAULT '',
   client_id INTEGER DEFAULT 0, client_name TEXT, client_typed TEXT, items TEXT, total REAL, photos TEXT DEFAULT '[]',
@@ -993,9 +994,18 @@ async def h_health(request):
         return web.json_response({"ok": False, "db": False, "error": str(e)[:100]}, status=503)
 
 
+def _sections_of(uid):
+    r = db.execute("SELECT m.secs FROM mc_sections m JOIN app_logins l ON l.login=m.login WHERE l.tg_id=?", (uid,)).fetchone()
+    try:
+        return json.loads(r["secs"]) if r else []
+    except Exception:
+        return []
+
+
 async def h_me(request):
     u = db.execute("SELECT * FROM users WHERE tg_id=?", (request["uid"],)).fetchone()
     return web.json_response({
+        "sections": _sections_of(request["uid"]),
         "id": u["tg_id"], "name": request["uname"], "tg_name": u["name"], "region": u["region"] or "", "admin": request["admin"],
         "allowed": request["allowed"], "agent": request["agent"], "role": request["role"],
         "clients": db.execute("SELECT COUNT(*) c FROM clients").fetchone()["c"],
@@ -1994,7 +2004,7 @@ def _staff_out(r):
     role = "sklad" if acc == SKLAD else "eksp" if acc == EKSP else "admin" if acc == ADMIN_ROLE or r["tg_id"] in ADMIN_IDS else "agent" if acc else ""
     return {"login": r["login"], "name": r["name"] or "", "phone": r["phone"] or "", "role": role,
             "agent": acc if role == "agent" else "", "active": bool(acc) or r["tg_id"] in ADMIN_IDS,
-            "last_seen": r["last_seen"] or 0, "telegram": r["tg_id"] > 0}
+            "last_seen": r["last_seen"] or 0, "telegram": r["tg_id"] > 0, "sections": _sections_of(r["tg_id"])}
 
 
 async def h_j_staff(request):
@@ -2034,6 +2044,9 @@ async def h_j_staff_save(request):
         uid = min(-1000, (db.execute("SELECT MIN(tg_id) m FROM users").fetchone()["m"] or 0)) - 1
         db.execute("INSERT INTO app_logins(login,pw,tg_id,created) VALUES(?,?,?,?)", (login, ph or pw_hash(pw), uid, now()))
         pw, ph = "", ""
+    if "sections" in b:                           # Jarvis rol bo'limlari (ilovadagi menyu shunga qarab)
+        secs = [str(x)[:40] for x in (b.get("sections") or []) if str(x).strip()][:200]
+        db.execute("INSERT OR REPLACE INTO mc_sections(login,secs) VALUES(?,?)", (login, json.dumps(secs)))
     name = re.sub(r"\s+", " ", str(b.get("name", "")).strip())[:80] or login
     db.execute("INSERT INTO users(tg_id,name,username,created,last_seen) VALUES(?,?,?,?,0) "
                "ON CONFLICT(tg_id) DO UPDATE SET name=excluded.name" + (", username=excluded.username" if uid < 0 else ""),
