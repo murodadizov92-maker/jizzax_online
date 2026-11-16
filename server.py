@@ -1630,9 +1630,16 @@ async def h_j_clients(request):
     _jarvis_ok(request)
     """Skladchi yozgan nom aniq bo'lmaydi: so'zlardan BIRORTASI mos kelsa ham chiqadi, eng o'xshashi birinchi."""
     sql, args = "SELECT id,ext_id,name,phone,region,address,agent,search FROM clients WHERE 1=1", []
-    if request.query.get("agent"):
-        sql += " AND agent=?"
-        args.append(request.query["agent"])
+    ag = request.query.get("agent", "").strip()
+    if ag:                                        # agent nomi qavssiz/kirill-lotin farqi bilan ham mos keladi
+        def _k(v):
+            return set(w for w in translit(re.sub(r"\(.*?\)", " ", str(v or ""))).split() if len(w) > 1)
+        ka = _k(ag)
+        ags = [r["agent"] for r in db.execute("SELECT DISTINCT agent FROM clients WHERE agent IS NOT NULL AND agent<>''").fetchall()]
+        ags = [a for a in ags if a == ag or (ka and (_k(a) <= ka or ka <= _k(a)) and _k(a))]
+        if ags:
+            sql += " AND agent IN (" + ",".join("?" * len(ags)) + ")"
+            args += ags
     q = request.query.get("q", "").strip()
     words = [w for w in re.split(r"[\s,.\-]+", q) if len(w) >= 2 and w.lower() not in ("aka", "opa", "dukon", "dukoni", "do'kon", "magazin", "магазин", "ака", "дукон")]
     if words:
@@ -1640,6 +1647,12 @@ async def h_j_clients(request):
         for w in words:
             args += [f"%{w.lower()}%", f"%{translit(w)}%"]
     rows = [dict(r) for r in db.execute(sql + " LIMIT 400", args).fetchall()]
+    if not rows and ag and words:                 # agent bazasida topilmadi — hamma mijozlar orasidan qidiramiz
+        sql2 = "SELECT id,ext_id,name,phone,region,address,agent,search FROM clients WHERE (" + " OR ".join(["search LIKE ? OR search LIKE ?"] * len(words)) + ")"
+        a2 = []
+        for w in words:
+            a2 += [f"%{w.lower()}%", f"%{translit(w)}%"]
+        rows = [dict(r) for r in db.execute(sql2 + " LIMIT 400", a2).fetchall()]
     if q:
         tq = translit(q)
         for r in rows:
@@ -2141,6 +2154,23 @@ async def h_narx_list(request):
     return web.json_response(snap)
 
 
+async def h_debt_refresh(request):
+    """Ekspeditor/admin: «Salesdan yangilash» — Jarvis keyingi tekshiruvda balanslarni Sales Doctor'dan qayta oladi."""
+    if request["role"] not in ("admin", "eksp"):
+        return web.json_response({"error": "Ruxsat yo'q"}, status=403)
+    kv_set("bal_req", str(now()))
+    return web.json_response({"ok": True, "t": int(kv_get("bal_t") or 0)})
+
+
+async def h_j_bal_req(request):
+    """Jarvis (har 30 soniyada): so'rov bormi? Bor bo'lsa qaytaradi va tozalaydi."""
+    _jarvis_ok(request)
+    v = int(kv_get("bal_req") or 0)
+    if v:
+        kv_set("bal_req", "0")
+    return web.json_response({"req": v})
+
+
 async def h_debtors(request):
     """Ekspeditor (va admin): barcha agentlar mijozlaridan qarzdorlar ro'yxati (Jarvis'dan har 10 daq. yangilanadi)."""
     if request["role"] not in ("admin", "eksp"):
@@ -2300,6 +2330,8 @@ def make_app():
         web.post("/jarvis/agent_stats", h_j_agent_stats),
         web.get("/api/agent/balances", h_agent_balances),
         web.get("/api/debtors", h_debtors),
+        web.post("/api/debtors/refresh", h_debt_refresh),
+        web.post("/jarvis/bal_req", h_j_bal_req),
         web.get("/api/narx/list", h_narx_list),
         web.post("/jarvis/narx", h_j_narx),
         web.get("/api/agent/stats", h_agent_stats),
