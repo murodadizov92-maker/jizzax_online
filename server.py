@@ -103,6 +103,7 @@ for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
              "ALTER TABLE clients ADD COLUMN added_by INTEGER DEFAULT 0",   # ilovada qo'lda qo'shilgan mijoz (kim qo'shgan)
              "ALTER TABLE clients ADD COLUMN added_at INTEGER DEFAULT 0",
              "ALTER TABLE orders ADD COLUMN printed_at INTEGER DEFAULT 0",
+             "ALTER TABLE returns ADD COLUMN paid_at INTEGER DEFAULT 0",        # SD'da balansdan ayirildi (Возврат с полки)
              "ALTER TABLE orders ADD COLUMN req_id TEXT DEFAULT ''",
              "ALTER TABLE clients ADD COLUMN balance REAL",                   # Jarvis'dan: mijoz balansi (manfiy = qarz)
              "ALTER TABLE clients ADD COLUMN bal_t INTEGER DEFAULT 0"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
@@ -1773,6 +1774,15 @@ async def h_j_ret_printed(request):
     return web.json_response({"ok": True})
 
 
+async def h_j_ret_paid(request):
+    """Jarvis: vozvrat summasi Sales Doctor'da mijoz balansidan ayirish uchun navbatga qo'yildi."""
+    _jarvis_ok(request)
+    ids = [int(x) for x in (await request.json()).get("ids", [])][:300]
+    db.executemany("UPDATE returns SET paid_at=? WHERE id=? AND status='approved'", [(now(), i) for i in ids])
+    db.commit()
+    return web.json_response({"ok": True})
+
+
 async def h_j_settings(request):
     _jarvis_ok(request)
     if request.method == "POST":
@@ -2322,6 +2332,7 @@ def make_app():
         web.post("/jarvis/returns/{id}/resend", h_j_ret_resend),
         web.get("/jarvis/return_invoice/{id}.jpg", h_j_ret_invoice),
         web.post("/jarvis/return_printed", h_j_ret_printed),
+        web.post("/jarvis/return_paid", h_j_ret_paid),
         web.get("/jarvis/settings", h_j_settings),
         web.post("/jarvis/settings", h_j_settings),
         web.get("/jarvis/agents", h_j_agents),
