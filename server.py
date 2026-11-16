@@ -2119,6 +2119,28 @@ async def h_agent_balances(request):
                               "t": int(kv_get("bal_t") or 0)})
 
 
+async def h_j_narx(request):
+    """Jarvis -> narx snapshot (turlar, tovarlar, narxlar). Faqat o'qish uchun saqlanadi."""
+    _jarvis_ok(request)
+    b = await request.json()
+    if not isinstance(b, dict) or "types" not in b:
+        return web.json_response({"error": "Noto'g'ri ma'lumot"}, status=400)
+    db.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('narx_snap', ?)", (json.dumps(b, ensure_ascii=False),))
+    db.commit()
+    return web.json_response({"ok": True, "types": len(b.get("types") or []), "products": len(b.get("products") or [])})
+
+
+async def h_narx_list(request):
+    """MC Xodim ilovasi: narx bo'limi (Jarvis'da 'Narxlar: ko'rish' yoki 'o'zgartirish' ruxsati bo'lsa)."""
+    secs = _sections_of(request["uid"])
+    if not (request["admin"] or "narx" in secs or "narx_edit" in secs):
+        return web.json_response({"error": "Narxlar bo'limi sizga berilmagan"}, status=403)
+    r = db.execute("SELECT v FROM kv WHERE k='narx_snap'").fetchone()
+    snap = json.loads(r["v"]) if r else {"t": 0, "types": [], "products": [], "prices": {}}
+    snap["can_edit"] = False                       # tahrir faqat Jarvis kompyuterida (hozircha)
+    return web.json_response(snap)
+
+
 async def h_debtors(request):
     """Ekspeditor (va admin): barcha agentlar mijozlaridan qarzdorlar ro'yxati (Jarvis'dan har 10 daq. yangilanadi)."""
     if request["role"] not in ("admin", "eksp"):
@@ -2278,6 +2300,8 @@ def make_app():
         web.post("/jarvis/agent_stats", h_j_agent_stats),
         web.get("/api/agent/balances", h_agent_balances),
         web.get("/api/debtors", h_debtors),
+        web.get("/api/narx/list", h_narx_list),
+        web.post("/jarvis/narx", h_j_narx),
         web.get("/api/agent/stats", h_agent_stats),
         web.post("/jarvis/staff", h_j_staff_save),
         web.post("/jarvis/staff/delete", h_j_staff_delete),
