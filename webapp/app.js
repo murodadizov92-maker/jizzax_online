@@ -314,7 +314,7 @@ async function home() {
       <div class="stat"><b id="s2">0</b><small>Bugungi summa</small></div>
       <div class="stat"><b id="s3">0</b><small>Yo'lda</small></div>
     </div>
-    <button class="btn" id="newOrd" data-a>➕ Yangi zakas</button>
+    <button class="btn" id="newOrd" data-a>➕ Yangi zakas</button>${hasNarx() ? '<button class="btn" id="narxB" data-a>💲 Narxlar</button>' : ''}
     ${S.me.role === 'agent' ? `<div class="aq" data-a>
       <button data-v="stock"><i>📦</i><b>Ombor</b><small>Bor mahsulotlar</small></button>
       <button data-v="bal"><i>💰</i><b>Balanslar</b><small>Mijoz qarzlari</small></button>
@@ -324,7 +324,7 @@ async function home() {
     <div id="list"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>`);
   ['s1', 's2', 's3'].forEach((id, i) => { const el = $('#' + id); const v = [S.stats.n, S.stats.sum, S.stats.way][i]; el.dataset.v = 0; countTo(el, v, { dur: 900 }); });
   setTimeout(paintTabsPill, 30);
-  $('#newOrd').onclick = newOrder;
+  $('#newOrd').onclick = newOrder; if ($('#narxB')) $('#narxB').onclick = () => { buzz(); narxView(); };
   $$('.aq [data-v]').forEach(b => b.onclick = () => { buzz(); ({ stock: stockView, bal: balView, stats: statsView })[b.dataset.v](); });
   if (S.me.role === 'agent') api('/api/agent/stats').then(r => {        // eslatma: o'tgan oyga nisbatan sotilmayotganlar
     const n0 = r.remind.filter(x => x.kind === 'none').length, n1 = r.remind.length - n0, b = $('#remBox'); if (!b || !r.remind.length) return;
@@ -695,11 +695,11 @@ const tmS = t => new Date(t * 1000).toLocaleString('uz', { day: '2-digit', month
 async function ekspHome() {
   clearTimer(); setBack(null); updateCartBar(false); setDock('home'); banner && banner.setProgress(null);
   render(`
-    <div class="sk2" data-a><button class="btn otkbtn" id="onew">🚫 Otkaz zakas</button><button class="btn debtbtn" id="dbt">💰 Qarzdorlar</button></div>
+    <div class="sk2" data-a><button class="btn otkbtn" id="onew">🚫 Otkaz zakas</button><button class="btn debtbtn" id="dbt">💰 Qarzdorlar</button>${hasNarx() ? '<button class="btn" id="narxB">💲 Narxlar</button>' : ''}</div>
     <div id="dsum" data-a></div>
     <h3 class="vt2" data-a>🚫 Mening otkazlarim</h3>
     <div id="list"><div class="sk"></div><div class="sk"></div></div>`);
-  $('#onew').onclick = otkNew; $('#dbt').onclick = () => { buzz(); debtView(); };
+  $('#onew').onclick = otkNew; $('#dbt').onclick = () => { buzz(); debtView(); }; if ($('#narxB')) $('#narxB').onclick = () => { buzz(); narxView(); };
   api('/api/debtors').then(r => { const b = $('#dsum'); if (!b) return;
     b.innerHTML = `<div class="card balsum click"><small>Mijozlarning umumiy qarzi</small><b>${money(r.debt)} so'm</b><span>${r.n_debt} ta mijoz qarzdor · ${agoAgo(r.t)}</span></div>`;
     b.firstChild.onclick = () => debtView(); }).catch(() => {});
@@ -718,6 +718,34 @@ async function ekspHome() {
   };
   await load(); S.timer = setInterval(load, 25000);
 }
+// Narxlar bo'limi: Jarvis'da "Narxlar: ko'rish" ruxsati berilgan xodimlarga (faqat o'qish)
+const hasNarx = () => !!S.me && (!!S.me.admin || (S.me.sections || []).some(x => x === 'narx' || x === 'narx_edit'));
+async function narxView() {
+  clearTimer(); setBack(S.me && S.me.role === 'eksp' ? ekspHome : home); setDock(null); updateCartBar(false);
+  render(`<h2 class="vt" data-a>💲 Narxlar</h2>
+    <div class="tabs" data-a id="ntabs"><i class="pill"></i><div class="tab on" data-k="sale">Sotish</div><div class="tab" data-k="buy">Kirim</div></div>
+    <select id="nt" data-a style="margin:10px 0;width:100%"></select>
+    <input id="nq" placeholder="🔍 Tovar nomi yoki brend" data-a>
+    <div id="nlist" data-a><div class="sk"></div><div class="sk"></div></div>`);
+  let snap;
+  try { snap = await api('/api/narx/list'); } catch (e) { $('#nlist').innerHTML = `<div class="mut">${esc(e.message)}</div>`; return; }
+  let kind = 'sale';
+  const draw = () => {
+    const ts = snap.types.filter(t => t.kind === kind);
+    const sel = $('#nt'); const cur = sel.value;
+    sel.innerHTML = ts.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+    if (ts.some(t => t.id === cur)) sel.value = cur;
+    const pt = sel.value, pr = (snap.prices || {})[pt] || {}, q = ($('#nq').value || '').toLowerCase().trim();
+    const rows = snap.products.filter(p => pr[p.id] != null && (!q || (p.name + ' ' + (p.brand || '')).toLowerCase().includes(q)));
+    $('#nlist').innerHTML = rows.length ? rows.map(p => `<div class="row" data-a style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid #eee"><span>${esc(p.name)}<br><small class="mut">${esc(p.brand || '')}</small></span><b style="white-space:nowrap">${Number(pr[p.id]).toLocaleString('ru-RU')}</b></div>`).join('')
+      : `<div class="mut">Narx topilmadi</div>`;
+  };
+  $$('#ntabs .tab').forEach(t => t.onclick = () => { buzz(); kind = t.dataset.k; $$('#ntabs .tab').forEach(x => x.classList.toggle('on', x === t)); draw(); });
+  $('#nt').onchange = draw; $('#nq').oninput = draw;
+  if (!snap.types.length) { $('#nlist').innerHTML = '<div class="mut">Narx ma\'lumoti hali yuklanmagan. Jarvis\'da «Sales Doctor\'dan olish» tugmasini bosing.</div>'; return; }
+  draw();
+}
+
 async function debtView() {
   clearTimer(); setBack(otkBack); setDock(null); updateCartBar(false);
   render(`<h2 class="vt" data-a>💰 Qarzdorlar</h2><div id="bsum" data-a></div>
