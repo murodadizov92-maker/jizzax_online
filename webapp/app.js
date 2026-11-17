@@ -695,29 +695,101 @@ const otkBack = () => S.me && S.me.role === 'eksp' ? ekspHome() : retHome();
 const tmS = t => new Date(t * 1000).toLocaleString('uz', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 async function ekspHome() {
   clearTimer(); setBack(null); updateCartBar(false); setDock('home'); banner && banner.setProgress(null);
+  const E = S.ek = S.ek || { tab: 'go', open: {} };
+  const dt = new Date(), wd = ['Yakshanba', 'Dushanba', 'Seshanba', 'Chorshanba', 'Payshanba', 'Juma', 'Shanba'][dt.getDay()];
+  const mn = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr'][dt.getMonth()];
   render(`
-    <div class="sk2" data-a><button class="btn otkbtn" id="onew">🚫 Otkaz zakas</button><button class="btn debtbtn" id="dbt">💰 Qarzdorlar</button>${hasNarx() ? '<button class="btn" id="narxB">💲 Narxlar</button>' : ''}</div>
-    <div id="dsum" data-a></div>
-    <h3 class="vt2" data-a>🚫 Mening otkazlarim</h3>
-    <div id="list"><div class="sk"></div><div class="sk"></div></div>`);
-  $('#onew').onclick = otkNew; $('#dbt').onclick = () => { buzz(); debtView(); }; if ($('#narxB')) $('#narxB').onclick = () => { buzz(); narxView(); };
-  api('/api/debtors').then(r => { const b = $('#dsum'); if (!b) return;
-    b.innerHTML = `<div class="card balsum click"><small>Mijozlarning umumiy qarzi</small><b>${money(r.debt)} so'm</b><span>${r.n_debt} ta mijoz qarzdor · ${agoAgo(r.t)}</span></div>`;
-    b.firstChild.onclick = () => debtView(); }).catch(() => {});
-  let sig = '';
-  const load = async () => {
-    try {
-      const { items } = await api('/api/otkaz');
-      const ns = JSON.stringify(items.map(o => [o.id, o.sent])); if (ns === sig) return; sig = ns;
-      $('#list').innerHTML = items.length ? items.map(o => `
-        <div class="card rise otkcard">
-          <div class="row"><b>🚫 Zakas № ${esc(o.order_no)}</b><span class="badge ${o.sent ? 's-delivered' : 's-new'}">${o.sent ? '✅ Guruhga ketdi' : '📋 Saqlandi'}</span></div>
-          <div class="mut">🏪 ${esc(o.client_name)} · ${tmS(o.created)} · 📷 ${o.photos.length}</div>
-          ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}
-        </div>`).join('') : '<div class="mut" style="text-align:center;padding:30px">Hali otkaz kiritilmagan</div>';
-    } catch (e) { $('#list').innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
+    <div class="ekh" data-a><div class="ekh-s">Salom,</div><div class="ekh-n">🚚 ${esc(S.me.name || '')}</div><div class="ekh-d">${wd}, ${dt.getDate()}-${mn} <span id="ekexp"></span></div></div>
+    <div class="ekk" data-a><div class="card"><b id="kz">—</b><span>Zakas</span></div><div class="card"><b id="ky" style="color:#0f9d58">—</b><span>Yetkazildi</span></div><div class="card"><b id="kp" style="color:#e8710a">—</b><span>Olingan pul</span></div></div>
+    <div class="eka" data-a>
+      <button data-t="go"><i>🚚</i>Yetkazish</button><button data-t="cash"><i>💵</i>Pul</button>
+      <button id="ekdebt"><i>💰</i>Qarzdor</button><button id="ekotk"><i>🚫</i>Otkaz</button>
+      ${hasNarx() ? '<button id="eknarx"><i>💲</i>Narxlar</button>' : ''}<button data-t="otk"><i>📋</i>Otkazlarim</button></div>
+    <div id="ekbody"><div class="sk"></div><div class="sk"></div></div>`);
+  $('#ekdebt').onclick = () => { buzz(); debtView(); }; $('#ekotk').onclick = () => { buzz(); S.otk = null; otkNew(); };
+  if ($('#eknarx')) $('#eknarx').onclick = () => { buzz(); narxView(); };
+  const tabs = () => $$('.eka [data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === E.tab));
+  $$('.eka [data-t]').forEach(b => b.onclick = () => { buzz(); E.tab = b.dataset.t; tabs(); draw(); });
+  tabs();
+  let D = null, sig = '';
+  const tel = t => (t || '').replace(/[^\d+]/g, '');
+  const left = o => Math.max(0, Math.round((o.total || 0) - (o.paid || 0)));
+  const stt = o => o.status === 3 ? ['gr', '✅ Yetkazildi'] : o.status === 2 ? ['y', '🚚 Yo\'lda'] : ['bl', '🕓 Navbatda'];
+  const card = o => {
+    const [k, t] = stt(o), op = E.open[o.id], l = left(o), map = o.lat && o.lng ? `https://maps.google.com/?q=${o.lat},${o.lng}` : (o.addr ? `https://maps.google.com/?q=${encodeURIComponent(o.addr + ' Jizzax')}` : '');
+    return `<div class="card ekc ${o.status === 3 ? 'dn' : ''}" data-o="${o.id}">
+      <div class="row"><b class="ekcn">${esc(o.client)}</b><span class="ekp ${k}">${t}${o.pending ? ' ⏳' : ''}</span></div>
+      <div class="mut">📍 ${esc([o.terr, o.addr].filter(Boolean).join(', ') || '—')} · №${o.id}${o.type === 2 ? ' · ↩️ vozvrat' : ''}</div>
+      <div class="row" style="margin-top:8px"><div><b class="eks">${money(o.total)} so'm</b>${o.paid ? `<div class="mut" style="font-size:12px">To'landi: ${money(o.paid)} · qoldi <b style="color:${l ? '#d93025' : '#0f9d58'}">${money(l)}</b></div>` : ''}</div>
+        <span class="mut" style="font-size:12px;text-align:right">${o.bal < 0 ? `Qarzi: <b style="color:#d93025">${money(-o.bal)}</b>` : ''}</span></div>
+      <div class="ekb">${o.tel ? `<a class="ekbt bl" href="tel:${tel(o.tel)}">📞</a>` : ''}${map ? `<a class="ekbt bl" href="${map}" target="_blank">🧭</a>` : ''}
+        <button class="ekbt" data-x="items">📦 ${o.items.length}</button>
+        ${o.status !== 3 ? `<button class="ekbt gr" data-x="dlv">✓ Yetkazdim</button>` : ''}
+        ${l > 0 ? `<button class="ekbt y" data-x="pay">💵 Pul</button>` : ''}
+        ${o.status !== 3 ? `<button class="ekbt rd" data-x="otk">🚫</button>` : ''}</div>
+      ${op === 'items' ? `<div class="ekit">${o.items.map(i => `<div class="row"><span>${esc(i.n)}</span><b>${fq(i.q)} × ${money(i.p)}</b></div>`).join('')}${o.comment ? `<div class="mut" style="margin-top:6px">💬 ${esc(o.comment)}</div>` : ''}</div>` : ''}
+      ${op === 'pay' ? `<div class="ekpay"><input id="pa${o.id}" inputmode="numeric" value="${l}"><div class="ekpm">${['Naqd', 'Plastik', 'Perechisleniye'].map((m, i) => `<button data-m="${m}" class="${i ? '' : 'on'}">${m}</button>`).join('')}</div>
+        <button class="btn" data-x="paygo">💾 ${money(l)} so'm olindi</button></div>` : ''}
+    </div>`;
   };
-  await load(); S.timer = setInterval(load, 25000);
+  const draw = () => {
+    const b = $('#ekbody'); if (!b || !D) return;
+    const it = D.items || [], dn = it.filter(o => o.status === 3).length, cs = Object.values(D.cash || {}).reduce((a, c) => a + c.s, 0);
+    $('#kz').textContent = it.length; $('#ky').textContent = dn; $('#kp').textContent = cs >= 1e6 ? (cs / 1e6).toFixed(1) + 'M' : money(cs);
+    $('#ekexp').textContent = D.exp ? '· ' + D.exp : '';
+    if (!D.exp) {
+      b.innerHTML = `<div class="card" data-a><b>Siz qaysi ekspeditorsiz?</b><div class="mut" style="margin:4px 0 10px">Bir marta tanlang — keyin bugungi zakaslaringiz shu yerda chiqadi.</div>
+        ${(D.names || []).map(n => `<button class="btn ekpick" data-n="${esc(n)}" style="margin:4px 0">${esc(n)}</button>`).join('') || '<div class="mut">Hozircha ekspeditorga biriktirilgan zakas yo\'q. Jarvis ishga tushgach chiqadi.</div>'}</div>`;
+      $$('.ekpick').forEach(x => x.onclick = async () => { await api('/api/eksp/pick', { method: 'POST', json: { exp: x.dataset.n } }); sig = ''; load(); });
+      return;
+    }
+    if (E.tab === 'cash') {
+      const C = D.cash || {}, ks = Object.keys(C), paid = it.filter(o => o.paid > 0), owe = it.filter(o => o.status === 3 && left(o) > 0);
+      b.innerHTML = `<div class="card ekcash" data-a><small>Bugun olingan pul (kassaga topshiriladi)</small><b>${money(cs)} so'm</b>
+          ${ks.map(k => `<div class="row"><span>${esc(k)} · ${C[k].n} ta</span><b>${money(C[k].s)}</b></div>`).join('') || '<div class="mut">Hali pul olinmagan</div>'}</div>
+        ${owe.length ? `<h3 class="vt2" data-a>⚠️ Yetkazildi, lekin to'liq to'lanmagan</h3>${owe.map(card).join('')}` : ''}
+        ${paid.length ? `<h3 class="vt2" data-a>💵 Pul olingan zakaslar</h3>${paid.map(o => `<div class="card strow"><div><b>${esc(o.client)}</b><div class="mut">№${o.id}</div></div><b>${money(o.paid)}</b></div>`).join('')}` : ''}`;
+    } else if (E.tab === 'otk') { otkList(b); return; }
+    else {
+      const act = it.filter(o => o.status !== 3), dl = it.filter(o => o.status === 3);
+      b.innerHTML = (act.length ? `<div class="row vt2" data-a><b>Keyingi manzillar</b><span class="mut">${act.length} ta qoldi</span></div>${act.map(card).join('')}` : `<div class="card" style="text-align:center;padding:24px" data-a>🎉 ${it.length ? 'Hammasi yetkazildi!' : 'Bugun sizga biriktirilgan zakas yo\'q'}</div>`)
+        + (dl.length ? `<h3 class="vt2" data-a>✅ Yetkazilganlar · ${dl.length}</h3>${dl.map(card).join('')}` : '');
+    }
+    bind();
+  };
+  const bind = () => $$('#ekbody .ekc').forEach(c => {
+    const id = +c.dataset.o, o = D.items.find(x => x.id === id);
+    c.querySelectorAll('[data-x]').forEach(x => x.onclick = async e => {
+      e.stopPropagation(); buzz(); const k = x.dataset.x;
+      if (k === 'items' || k === 'pay') { E.open[id] = E.open[id] === k ? '' : k; draw(); if (k === 'pay') { const i = $('#pa' + id); i && i.focus(); } return; }
+      if (k === 'otk') { S.otk = { client: o.client, no: String(id), photos: [], comment: '' }; otkNew(); return; }
+      if (k === 'dlv') { if (!confirm(`№${id} · ${o.client}\nYetkazildi deb belgilansinmi?`)) return;
+        try { await api('/api/eksp/act', { method: 'POST', json: { oid: id, kind: 'delivered' } }); o.status = 3; o.pending = true; toast('✅ Yetkazildi'); E.open[id] = left(o) > 0 ? 'pay' : ''; draw(); } catch (er) { toast(er.message); } return; }
+      if (k === 'paygo') { const amt = +String($('#pa' + id).value).replace(/[^\d.]/g, ''), m = (c.querySelector('.ekpm .on') || {}).dataset;
+        if (!amt) return toast('Summani kiriting');
+        try { await api('/api/eksp/act', { method: 'POST', json: { oid: id, kind: 'cash', amount: amt, pay: m ? m.m : 'Naqd' } }); toast(`💵 ${money(amt)} so'm yozildi`); E.open[id] = ''; sig = ''; load(); } catch (er) { toast(er.message); } }
+    });
+    c.querySelectorAll('.ekpm button').forEach(x => x.onclick = e => { e.stopPropagation(); c.querySelectorAll('.ekpm button').forEach(y => y.classList.toggle('on', y === x)); });
+    c.querySelectorAll('.ekpay input').forEach(x => x.onclick = e => e.stopPropagation());
+  });
+  const load = async () => {
+    if (document.querySelector('.ekpay input:focus')) return;
+    try { const r = await api('/api/eksp/today'); const ns = JSON.stringify([r.exp, r.items, r.cash]); if (ns === sig) return; sig = ns; D = r; draw(); }
+    catch (e) { const b = $('#ekbody'); if (b) b.innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
+  };
+  await load(); S.timer = setInterval(load, 30000);
+}
+async function otkList(box) {                         // ekspeditorning otkazlari (oldingi bosh sahifadagi ro'yxat)
+  box.innerHTML = '<div class="sk"></div>';
+  try {
+    const { items } = await api('/api/otkaz');
+    box.innerHTML = items.length ? items.map(o => `
+      <div class="card rise otkcard">
+        <div class="row"><b>🚫 Zakas № ${esc(o.order_no)}</b><span class="badge ${o.sent ? 's-delivered' : 's-new'}">${o.sent ? '✅ Guruhga ketdi' : '📋 Saqlandi'}</span></div>
+        <div class="mut">🏪 ${esc(o.client_name)} · ${tmS(o.created)} · 📷 ${o.photos.length}</div>
+        ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}
+      </div>`).join('') : '<div class="mut" style="text-align:center;padding:30px">Hali otkaz kiritilmagan</div>';
+  } catch (e) { box.innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
 }
 // Narxlar bo'limi: Jarvis'da "Narxlar: ko'rish" ruxsati berilgan xodimlarga (faqat o'qish)
 const hasNarx = () => !!S.me && (!!S.me.admin || (S.me.sections || []).some(x => x === 'narx' || x === 'narx_edit'));

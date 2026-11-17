@@ -561,3 +561,22 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 .remrow.none .rk{color:#D92D20;background:#FEE4E2}
 #stc{display:flex;gap:8px;overflow-x:auto;margin:10px 0;padding-bottom:4px}
 .btn.debtbtn{background:linear-gradient(135deg,#12B886,#087F5B)!important;box-shadow:0 12px 26px rgba(8,127,91,.32)!important}
+
+/* ===== EKSPEDITOR bosh sahifasi ===== */
+.ekh{margin:-6px -14px 0;padding:18px 18px 62px;border-radius:0 0 28px 28px;background:linear-gradient(135deg,#d7263d,#f46036);color:#fff}
+.ekh-s{font-size:13px;opacity:.85}.ekh-n{font-size:23px;font-weight:800;margin-top:2px}.ekh-d{font-size:12.5px;opacity:.85;margin-top:4px}
+.ekk{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:-48px 0 0;position:relative}
+.ekk .card{padding:10px 6px;text-align:center;margin:0}.ekk b{display:block;font-size:19px}.ekk span{font-size:11.5px;color:#7a8094}
+.eka{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.eka button{all:unset;cursor:pointer;background:#fff;border-radius:16px;padding:10px 4px;text-align:center;font-size:12px;font-weight:700;color:#2b2d3a;box-shadow:0 4px 14px rgba(0,0,0,.05);border:2px solid transparent}
+.eka button i{display:block;font-style:normal;font-size:22px;margin-bottom:3px}.eka button.on{border-color:#ef6c1f;color:#ef6c1f}
+.ekc{margin-top:10px}.ekc.dn{opacity:.75}.ekcn{font-size:15px}.eks{font-size:17px}
+.ekp{font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px;white-space:nowrap}
+.ekp.y,.ekbt.y{background:#fff3e0;color:#e8710a}.ekp.gr,.ekbt.gr{background:#e3f7ec;color:#0f9d58}.ekp.bl,.ekbt.bl{background:#e7f0ff;color:#1a73e8}.ekbt.rd{background:#fdeaea;color:#d93025}
+.ekb{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+.ekbt{all:unset;cursor:pointer;font-size:12.5px;font-weight:700;padding:8px 9px;border-radius:11px;background:#f1f2f6;color:#3a3d4d;text-decoration:none}
+.ekit{margin-top:10px;padding-top:8px;border-top:1px dashed #e3e5ec;font-size:13px}.ekit .row{padding:3px 0;gap:10px}
+.ekpay{margin-top:10px;padding-top:10px;border-top:1px dashed #e3e5ec}.ekpay input{font-size:20px;font-weight:800;text-align:center}
+.ekpm{display:flex;gap:6px;margin:8px 0}.ekpm button{all:unset;cursor:pointer;flex:1;text-align:center;padding:8px 4px;border-radius:10px;background:#f1f2f6;font-size:12.5px;font-weight:700}
+.ekpm button.on{background:#ef6c1f;color:#fff}
+.ekcash{display:flex;flex-direction:column;gap:6px}.ekcash small{color:#8A8597}.ekcash b{font-size:24px}.ekcash .row b{font-size:15px}
