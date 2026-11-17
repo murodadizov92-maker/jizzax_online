@@ -125,7 +125,8 @@ for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
              "ALTER TABLE otkaz ADD COLUMN sklad_uid INTEGER DEFAULT 0",
              "ALTER TABLE otkaz ADD COLUMN approved_at INTEGER DEFAULT 0",
              "ALTER TABLE otkaz ADD COLUMN approved_by TEXT DEFAULT ''",
-             "ALTER TABLE otkaz ADD COLUMN reason TEXT DEFAULT ''"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
+             "ALTER TABLE otkaz ADD COLUMN reason TEXT DEFAULT ''",
+             "ALTER TABLE eksp_link ADD COLUMN data TEXT DEFAULT ''"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
     try:
         db.execute(_sql)
     except sqlite3.OperationalError:
@@ -1037,7 +1038,11 @@ def _elink(uid):
     if not r:
         return None
     try:
-        return {"exp": r["exp"] or "", "agents": json.loads(r["agents"] or "[]"), "ptypes": json.loads(r["ptypes"] or "[]")}
+        try:
+            data = json.loads(r["data"] or "{}") if "data" in r.keys() else {}
+        except Exception:
+            data = {}
+        return {"exp": r["exp"] or "", "agents": json.loads(r["agents"] or "[]"), "ptypes": json.loads(r["ptypes"] or "[]"), "data": data}
     except Exception:
         return None
 
@@ -2397,9 +2402,16 @@ async def h_narx_list(request):
     r = db.execute("SELECT v FROM kv WHERE k='narx_snap'").fetchone()
     snap = json.loads(r["v"]) if r else {"t": 0, "types": [], "products": [], "prices": {}}
     lk = _elink(request["uid"]) if request["role"] == "eksp" else None
-    if lk and lk["ptypes"]:                         # ekspeditor: faqat o'z agenti(lari)ning narx turi
-        snap["types"] = [t for t in snap.get("types") or [] if str(t.get("id")) in lk["ptypes"]]
-        snap["prices"] = {k: v for k, v in (snap.get("prices") or {}).items() if k in lk["ptypes"]}
+    if lk and (lk.get("data") or {}).get("pt"):      # ekspeditor: Jarvis yuborgan o'z agenti narxlari (yashirilgan tur bo'lsa ham)
+        d = lk["data"]
+        snap = {"t": snap.get("t"), "types": [{"id": str(t["id"]), "name": t.get("name") or t["id"], "kind": "sale"} for t in d["pt"]],
+                "products": d.get("products") or [], "prices": {str(t["id"]): t.get("prices") or {} for t in d["pt"]}, "only": lk["agents"]}
+    elif lk and lk["ptypes"]:                       # ekspeditor: faqat o'z agenti(lari)ning narx turi
+        names = {norm(agent_price_map(a)[0]) for a in lk["agents"] if agent_find(a)} - {""}
+        ok = [t for t in snap.get("types") or [] if str(t.get("id")) in lk["ptypes"] or norm(t.get("name", "")) in names]
+        ids = {str(t.get("id")) for t in ok}
+        snap["types"] = ok
+        snap["prices"] = {k: v for k, v in (snap.get("prices") or {}).items() if k in ids}
         snap["only"] = lk["agents"]
     snap["can_edit"] = False                       # tahrir faqat Jarvis kompyuterida (hozircha)
     return web.json_response(snap)
@@ -2519,9 +2531,10 @@ async def h_j_eksp_link(request):
     login = str(b.get("login", "")).strip().lower()
     if not login:
         return web.json_response({"error": "login yo'q"}, status=400)
-    db.execute("INSERT OR REPLACE INTO eksp_link(login,exp,agents,ptypes,updated) VALUES(?,?,?,?,?)",
+    data = {"pt": b.get("pt") or [], "products": b.get("products") or []}
+    db.execute("INSERT OR REPLACE INTO eksp_link(login,exp,agents,ptypes,updated,data) VALUES(?,?,?,?,?,?)",
                (login, str(b.get("exp", ""))[:80], json.dumps([str(x)[:80] for x in b.get("agents") or []], ensure_ascii=False),
-                json.dumps([str(x)[:40] for x in b.get("ptypes") or []]), now()))
+                json.dumps([str(x)[:40] for x in b.get("ptypes") or []]), now(), json.dumps(data, ensure_ascii=False)))
     db.commit()
     return web.json_response({"ok": True})
 
