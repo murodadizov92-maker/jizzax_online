@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS stock(
   key TEXT PRIMARY KEY, name TEXT, qty REAL, unit TEXT DEFAULT '', src TEXT, updated INTEGER);
 CREATE TABLE IF NOT EXISTS pmeta(pid TEXT PRIMARY KEY, unit TEXT);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS eksp_acts(id INTEGER PRIMARY KEY AUTOINCREMENT, oid INTEGER, kind TEXT, amount REAL DEFAULT 0, pay TEXT,
+  note TEXT, uid INTEGER, user TEXT, exp TEXT, client TEXT, created INTEGER, done INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS app_tokens(th TEXT PRIMARY KEY, tg_id INTEGER, created INTEGER, last_used INTEGER, device TEXT);
 CREATE TABLE IF NOT EXISTS app_logins(login TEXT PRIMARY KEY, pw TEXT, tg_id INTEGER UNIQUE, created INTEGER);
 CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, kind TEXT, title TEXT, body TEXT, order_id INTEGER, created INTEGER, read INTEGER DEFAULT 0);
@@ -2211,6 +2213,118 @@ async def h_j_bal_req(request):
     return web.json_response({"req": v})
 
 
+# ---------------------------------------------------------------- EKSPEDITOR: bugungi yetkazishlar, «Yetkazdim», «Pul oldim»
+def _ekey(s: str) -> str:
+    w = (s or "").replace("(", " ").split()
+    return re.sub(r"[^a-z0-9]", "", translit(w[0].lower())) if w else ""
+
+
+def _eksp_rows():
+    try:
+        return json.loads(kv_get("eksp_orders") or "[]")
+    except Exception:
+        return []
+
+
+def _eksp_of(request, rows):
+    names = sorted({r.get("exp") or "" for r in rows if r.get("exp")})
+    if request["admin"] and request.query.get("exp"):
+        return request.query["exp"], names
+    mine = kv_get(f"eksp_of:{request['uid']}")
+    if mine:
+        return mine, names
+    k = _ekey(request["uname"])
+    hit = [n for n in names if k and _ekey(n) == k]
+    return (hit[0] if len(hit) == 1 else ""), names
+
+
+def _day_start() -> int:
+    t = datetime.utcnow() + timedelta(hours=5)
+    return int((datetime(t.year, t.month, t.day) - timedelta(hours=5) - datetime(1970, 1, 1)).total_seconds())
+
+
+async def h_eksp_today(request):
+    if request["role"] not in ("admin", "eksp"):
+        return web.json_response({"error": "Faqat ekspeditor uchun"}, status=403)
+    rows = _eksp_rows()
+    exp, names = _eksp_of(request, rows)
+    mine = [dict(r) for r in rows if exp and r.get("exp") == exp]
+    pend = db.execute("SELECT * FROM eksp_acts WHERE done=0 AND oid IN (%s)" % ",".join("?" * len(mine)),
+                      [r["id"] for r in mine]).fetchall() if mine else []
+    by = {r["id"]: r for r in mine}
+    for a in pend:                                   # Jarvis hali yozmagan amallar ham darhol ko'rinsin
+        o = by.get(a["oid"])
+        if not o:
+            continue
+        if a["kind"] == "delivered":
+            o["status"] = 3
+        elif a["kind"] == "cash":
+            o["paid"] = (o.get("paid") or 0) + (a["amount"] or 0)
+        o["pending"] = True
+    cash = {}
+    for a in db.execute("SELECT pay, SUM(amount) s, COUNT(*) n FROM eksp_acts WHERE kind='cash' AND exp=? AND created>=? GROUP BY pay",
+                        (exp, _day_start())).fetchall():
+        cash[a["pay"] or "Naqd"] = {"s": a["s"] or 0, "n": a["n"]}
+    mine.sort(key=lambda r: (r["status"] == 3, r.get("dload") or "", r["id"]))
+    return web.json_response({"exp": exp, "names": names, "items": mine, "cash": cash, "t": int(kv_get("eksp_t") or 0)})
+
+
+async def h_eksp_pick(request):
+    if request["role"] not in ("admin", "eksp"):
+        return web.json_response({"error": "Ruxsat yo'q"}, status=403)
+    b = await request.json()
+    kv_set(f"eksp_of:{request['uid']}", str(b.get("exp", ""))[:80])
+    return web.json_response({"ok": True})
+
+
+async def h_eksp_act(request):
+    if request["role"] not in ("admin", "eksp"):
+        return web.json_response({"error": "Ruxsat yo'q"}, status=403)
+    b = await request.json()
+    kind = str(b.get("kind", ""))
+    if kind not in ("delivered", "cash"):
+        return web.json_response({"error": "Noma'lum amal"}, status=400)
+    rows = _eksp_rows()
+    exp, _ = _eksp_of(request, rows)
+    o = next((r for r in rows if str(r["id"]) == str(b.get("oid")) and (request["admin"] or r.get("exp") == exp)), None)
+    if not o:
+        return web.json_response({"error": "Zakas topilmadi"}, status=404)
+    amt = _num(b.get("amount")) if kind == "cash" else 0
+    if kind == "cash" and amt <= 0:
+        return web.json_response({"error": "Summani kiriting"}, status=400)
+    if kind == "delivered" and db.execute("SELECT 1 FROM eksp_acts WHERE oid=? AND kind='delivered' AND done=0", (o["id"],)).fetchone():
+        return web.json_response({"ok": True, "dup": True})
+    db.execute("INSERT INTO eksp_acts(oid,kind,amount,pay,note,uid,user,exp,client,created) VALUES(?,?,?,?,?,?,?,?,?,?)",
+               (o["id"], kind, amt, str(b.get("pay", ""))[:30], str(b.get("note", ""))[:200], request["uid"], request["uname"],
+                o.get("exp") or exp, o.get("client") or "", now()))
+    db.commit()
+    return web.json_response({"ok": True})
+
+
+async def h_j_eksp_orders(request):
+    _jarvis_ok(request)
+    b = await request.json()
+    kv_set("eksp_orders", json.dumps(b.get("items") or [], ensure_ascii=False))
+    kv_set("eksp_t", str(now()))
+    return web.json_response({"ok": True, "n": len(b.get("items") or [])})
+
+
+async def h_j_eksp_acts(request):
+    _jarvis_ok(request)
+    rows = [dict(r) for r in db.execute("SELECT * FROM eksp_acts WHERE done=0 ORDER BY id LIMIT 200").fetchall()]
+    return web.json_response({"items": rows})
+
+
+async def h_j_eksp_ack(request):
+    _jarvis_ok(request)
+    b = await request.json()
+    ids = [int(x) for x in b.get("ids") or []]
+    db.executemany("UPDATE eksp_acts SET done=1 WHERE id=?", [(i,) for i in ids])
+    db.commit()
+    return web.json_response({"ok": True})
+
+
+
 async def h_debtors(request):
     """Ekspeditor (va admin): barcha agentlar mijozlaridan qarzdorlar ro'yxati (Jarvis'dan har 10 daq. yangilanadi)."""
     if request["role"] not in ("admin", "eksp"):
@@ -2372,6 +2486,12 @@ def make_app():
         web.get("/api/agent/balances", h_agent_balances),
         web.get("/api/debtors", h_debtors),
         web.post("/api/debtors/refresh", h_debt_refresh),
+        web.get("/api/eksp/today", h_eksp_today),
+        web.post("/api/eksp/pick", h_eksp_pick),
+        web.post("/api/eksp/act", h_eksp_act),
+        web.post("/jarvis/eksp_orders", h_j_eksp_orders),
+        web.get("/jarvis/eksp_acts", h_j_eksp_acts),
+        web.post("/jarvis/eksp_ack", h_j_eksp_ack),
         web.post("/jarvis/bal_req", h_j_bal_req),
         web.get("/api/narx/list", h_narx_list),
         web.post("/jarvis/narx", h_j_narx),
