@@ -210,6 +210,7 @@ function createScene(canvas, intro) {
 let banner = null, introScene = null;
 // ochilish: eski kolbasa animatsiyasi o'rniga — kod/barmoq izidan keyin brend videosi (intro.mp4, ovozsiz)
 try { banner = window.createBanner ? createBanner($('#bannerCanvas'), () => S.products) : null; } catch (e) { banner = null; }
+const fullN = L => (L || []).map(p => p.full ? { ...p, sname: p.name, name: p.full } : p);   // Sales Doctor'dagi to'liq nom
 window.__bannerAdd = p => { S.cart[p.id] = (S.cart[p.id] || 0) + 1; saveCart(); toast('Savatga qo\'shildi'); };
 async function playIntro() {                     // ilova yuklanguncha qisqa och fon, keyin darrov kod oynasi
   await sleep(250);
@@ -456,8 +457,8 @@ async function pickProducts() {
   setBack(R ? retNew : newOrder); setDock(null);
   if (!S.products.length || S.prodAgent !== pag) {                 // narxlar agent narx turi bo'yicha (agent almashsa qayta olinadi)
     render('<div class="grid">' + '<div class="sk" style="height:220px;border-radius:22px"></div>'.repeat(4) + '</div>');
-    try { const r = await api(purl); S.products = r.items; S.prodAgent = pag; if (R) S.ret.ptype = r.ptype || ''; } catch (e) { toast(e.message); return; }
-  } else api(purl).then(r => { S.products = r.items; }).catch(() => {});
+    try { const r = await api(purl); S.products = fullN(r.items); S.prodAgent = pag; if (R) S.ret.ptype = r.ptype || ''; } catch (e) { toast(e.message); return; }
+  } else api(purl).then(r => { S.products = fullN(r.items); }).catch(() => {});
   const cats = ['Hammasi', ...new Set(S.products.map(p => p.category))];
   render(`
     <div class="steps" data-a><span>1. ${R ? 'Agent' : 'Mijoz'}</span><span class="on">2. Mahsulot</span><span>3. Tasdiq</span></div>
@@ -749,23 +750,55 @@ async function narxView() {
 async function debtView() {
   clearTimer(); setBack(otkBack); setDock(null); updateCartBar(false);
   render(`<h2 class="vt" data-a>💰 Qarzdorlar</h2><div id="bsum" data-a></div>
-    <input id="bq" placeholder="🔍 Mijoz, manzil yoki telefon" data-a>
-    <div class="chips" id="dag" data-a style="flex-wrap:wrap;margin-top:8px"></div>
-    <div id="bl"><div class="sk"></div><div class="sk"></div></div>`);
-  let r, ag = '';
+    <div class="sk2" data-a><button class="btn" id="bref">🔄 Salesdan yangilash</button></div>
+    <input id="bq" placeholder="🔍 Agent yoki mijoz nomi" data-a style="margin-top:8px">
+    <div id="bl" style="margin-top:10px"><div class="sk"></div><div class="sk"></div></div>`);
+  let r, ag = '';                                  // ag: tanlangan agent ('' = agentlar ro'yxati)
   try { r = await api('/api/debtors'); } catch (e) { $('#bl').innerHTML = `<div class="mut">${esc(e.message)}</div>`; return; }
+  const cl = c => `<div class="card strow"><div><b>${esc(c.name)}</b><div class="mut">${esc([c.region, c.address].filter(Boolean).join(' · '))}</div>
+      <div class="mut" style="font-size:12px">🧑‍💼 ${esc(c.agent || '—')}${c.phone ? ` · <a href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}" style="color:inherit">📞 ${esc(c.phone)}</a>` : ''}</div></div>
+      <span class="bal neg">−${money(Math.abs(c.balance || 0))}</span></div>`;
+  const ag1 = a => `<div class="card strow" data-ag="${esc(a.agent)}" style="cursor:pointer"><div><b>🧑‍💼 ${esc(a.agent.replace(/\s*\(.*?\)\s*/g, ' ').trim())}</b><div class="mut">${a.n} ta mijoz</div></div>
+      <span class="bal neg">−${money(Math.abs(a.debt || 0))}</span></div>`;
   const draw = () => {
     const q = $('#bq').value.trim().toLowerCase();
-    const L = r.items.filter(c => (!ag || (c.agent || '—') === ag) && (!q || [c.name, c.region, c.address, c.phone, c.ext_id].join(' ').toLowerCase().includes(q)));
+    const hit = c => [c.name, c.region, c.address, c.phone, c.ext_id].join(' ').toLowerCase().includes(q);
+    const inAg = c => !ag || ag === '__all' || (c.agent || '—') === ag;
+    const L = r.items.filter(c => inAg(c) && (!q || hit(c)));            // agent ichida ham qidiriladi
     const sum = L.reduce((s, c) => s - (c.balance || 0), 0);
-    $('#bsum').innerHTML = `<div class="card balsum"><small>${ag ? esc(ag) + ' mijozlari' : 'Hamma agentlar'} · qarz</small><b>${money(sum)} so'm</b><span>${L.length} ta mijoz · ${agoAgo(r.t)}</span></div>`;
-    $('#dag').innerHTML = [`<button class="chip ${!ag ? 'on' : ''}" data-g="">Hammasi</button>`, ...r.agents.map(a => `<button class="chip ${ag === a.agent ? 'on' : ''}" data-g="${esc(a.agent)}">${esc(a.agent.replace(/\s*\(.*?\)\s*/g, ' ').trim())} · ${a.n}</button>`)].join('');
-    $$('#dag [data-g]').forEach(b => b.onclick = () => { ag = b.dataset.g; buzz(); draw(); });
-    $('#bl').innerHTML = L.map(c => `<div class="card strow"><div><b>${esc(c.name)}</b><div class="mut">${esc([c.region, c.address].filter(Boolean).join(' · '))}</div>
-      <div class="mut" style="font-size:12px">🧑‍💼 ${esc(c.agent || '—')}${c.phone ? ` · <a href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}" style="color:inherit">📞 ${esc(c.phone)}</a>` : ''}</div></div>
-      <span class="bal neg">−${money(Math.abs(c.balance || 0))}</span></div>`).join('') || '<div class="mut" style="padding:20px;text-align:center">Qarzdor topilmadi</div>';
+    const lbl = !ag ? 'Hamma agentlar · qarz' : ag === '__all' ? 'Hamma mijozlar · qarz' : esc(ag.replace(/\s*\(.*?\)\s*/g, ' ').trim()) + ' · qarz';
+    $('#bsum').innerHTML = `<div class="card balsum"><small>${lbl}</small><b>${money(ag ? sum : r.debt)} so'm</b><span>${ag ? L.length : r.n_debt} ta mijoz · ${agoAgo(r.t)}</span></div>`;
+    let html = '';
+    if (ag) {
+      html += `<button class="btn" id="bback" style="margin-bottom:10px">← Agentlar</button>` + (L.map(cl).join('') || '<div class="mut" style="padding:20px;text-align:center">Qarzdor topilmadi</div>');
+    } else if (q) {
+      const AG = r.agents.filter(a => a.agent.toLowerCase().includes(q));
+      const CL = r.items.filter(c => hit(c)).slice(0, 50);
+      html += AG.map(ag1).join('') + CL.map(cl).join('');
+      if (!AG.length && !CL.length) html += '<div class="mut" style="padding:20px;text-align:center">Topilmadi</div>';
+    } else {
+      html += `<button class="btn" id="ball" style="margin-bottom:10px">👥 Hamma mijozlar</button>` + (r.agents.map(ag1).join('') || '<div class="mut" style="padding:20px;text-align:center">Qarzdor topilmadi</div>');
+    }
+    $('#bl').innerHTML = html;
   };
-  $('#bq').oninput = draw; draw();
+  $('#bl').onclick = e => {
+    const a = e.target.closest('[data-ag]'); if (a) { ag = a.dataset.ag; $('#bq').value = ''; buzz(); return draw(); }
+    if (e.target.closest('#bback')) { ag = ''; buzz(); return draw(); }
+    if (e.target.closest('#ball')) { ag = '__all'; buzz(); return draw(); }
+  };
+  $('#bq').oninput = draw;
+  $('#bref').onclick = async () => {
+    buzz();
+    const t0 = r.t;
+    try { await api('/api/debtors/refresh', { method: 'POST' }); } catch (e) { return toast(e.message); }
+    toast("Sales Doctor'dan yangilanmoqda… 1–2 daqiqa");
+    for (let i = 0; i < 20; i++) {
+      await new Promise(res => setTimeout(res, 6000));
+      try { const n = await api('/api/debtors'); if (n.t !== t0) { r = n; draw(); return toast('✅ Yangilandi'); } } catch (e) {}
+    }
+    toast("Hali yangilanmadi, keyinroq qayting");
+  };
+  draw();
 }
 
 async function otkNew() {                          // otkaz zakas: mijoz + zakas raqami + mahsulot rasmlari
@@ -964,7 +997,7 @@ function adminView() {
   stInfo();
   $('#stsd').onclick = async () => { $('#stdbg').textContent = '…'; try { const r = await api('/api/stock/sync?debug=1', { method: 'POST' }); $('#stdbg').textContent = r.ok ? `✅ ${r.rows} ta qator (${r.method})` : `❌ ${r.error}\n` + JSON.stringify(r.tried || [], null, 1).slice(0, 900); S.products = (await api('/api/products')).items; stInfo(); } catch (e) { $('#stdbg').textContent = e.message; } };
   $('#stup').onclick = async () => { const f = $('#stx').files[0]; if (!f) return toast('Fayl tanlang'); const fd = new FormData(); fd.append('file', f); try { const r = await api('/api/stock/import', { method: 'POST', body: fd }); toast(`${r.rows} ta qator yuklandi`); S.products = (await api('/api/products')).items; stInfo(); } catch (e) { toast(e.message); } };
-  $('#sync').onclick = async () => { try { S.products = (await api('/api/products?force=1')).items; toast(`${S.products.length} ta mahsulot`); } catch (e) { toast(e.message); } };
+  $('#sync').onclick = async () => { try { S.products = fullN((await api('/api/products?force=1')).items); toast(`${S.products.length} ta mahsulot`); } catch (e) { toast(e.message); } };
 }
 
 /* ================================================================== katta yozuv (kattalar uchun) */
@@ -1191,7 +1224,7 @@ async function start() {
       return;
     }
     if (S.me.role === 'eksp') { const d = $('#dock [data-d="new"] span'); if (d) d.textContent = 'Otkaz'; const h = $('#dock [data-d="home"] span'); if (h) h.textContent = 'Bosh'; $('#hello').textContent = '🚚 ' + S.me.name; }
-    if (S.me.role !== 'sklad' && S.me.role !== 'eksp') api('/api/products').then(r => { S.products = r.items; banner && banner.refresh(); }).catch(() => {});
+    if (S.me.role !== 'sklad' && S.me.role !== 'eksp') api('/api/products').then(r => { S.products = fullN(r.items); banner && banner.refresh(); }).catch(() => {});
     if (S.me.role === 'sklad') { useMode('ret'); const d = $('#dock [data-d="new"] span'); if (d) d.textContent = 'Vozvrat'; const h = $('#dock [data-d="home"] span'); if (h) h.textContent = 'Ro\'yxat'; $('#hello').textContent = '📦 Sklad · ' + S.me.name; }
     if (lockOn() && !unlocked) showLock(ok => { if (ok) { unlocked = true; playVid().then(home); } }); else playVid().then(home);
     pollNotes();
