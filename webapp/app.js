@@ -760,7 +760,7 @@ async function ekspHome() {
     const [k, t] = stt(o), op = E.open[o.id], l = left(o), map = o.lat && o.lng ? `https://maps.google.com/?q=${o.lat},${o.lng}` : (o.addr ? `https://maps.google.com/?q=${encodeURIComponent(o.addr + ' Jizzax')}` : '');
     return `<div class="card ekc ${o.status === 3 ? 'dn' : ''}" data-o="${o.id}">
       <div class="row"><b class="ekcn">${esc(o.client)}</b><span class="ekp ${k}">${t}${o.pending ? ' ⏳' : ''}</span></div>
-      <div class="mut">📍 ${esc([o.terr, o.addr].filter(Boolean).join(', ') || '—')} · №${o.id}${o.type === 2 ? ' · ↩️ vozvrat' : ''}</div>
+      <div class="mut">📍 ${esc([o.terr, o.addr].filter(Boolean).join(', ') || '—')} · №${esc(o.no || o.id)}${o.agent ? ' · 🧑‍💼 ' + esc(o.agent.replace(/\s*\(.*?\)\s*/g, ' ').trim()) : ''}${o.type === 2 ? ' · ↩️ vozvrat' : ''}</div>
       <div class="row" style="margin-top:8px"><div><b class="eks">${money(o.total)} so'm</b>${o.paid ? `<div class="mut" style="font-size:12px">To'landi: ${money(o.paid)} · qoldi <b style="color:${l ? '#d93025' : '#0f9d58'}">${money(l)}</b></div>` : ''}</div>
         <span class="mut" style="font-size:12px;text-align:right">${o.bal < 0 ? `Qarzi: <b style="color:#d93025">${money(-o.bal)}</b>` : ''}</span></div>
       <div class="ekb">${o.tel ? `<a class="ekbt bl" href="tel:${tel(o.tel)}">📞</a>` : ''}${map ? `<a class="ekbt bl" href="${map}" target="_blank">🧭</a>` : ''}
@@ -769,7 +769,7 @@ async function ekspHome() {
         ${l > 0 ? `<button class="ekbt y" data-x="pay">💵 Pul</button>` : ''}
         ${o.status !== 3 ? `<button class="ekbt rd" data-x="otk">🚫</button>` : ''}</div>
       ${op === 'items' ? `<div class="ekit">${o.items.map(i => `<div class="row"><span>${esc(i.n)}</span><b>${fq(i.q)} × ${money(i.p)}</b></div>`).join('')}${o.comment ? `<div class="mut" style="margin-top:6px">💬 ${esc(o.comment)}</div>` : ''}</div>` : ''}
-      ${op === 'pay' ? `<div class="ekpay"><input id="pa${o.id}" inputmode="numeric" value="${l}"><div class="ekpm">${['Naqd', 'Plastik', 'Perechisleniye'].map((m, i) => `<button data-m="${m}" class="${i ? '' : 'on'}">${m}</button>`).join('')}</div>
+      ${op === 'pay' ? `<div class="ekpay"><input class="pain" inputmode="numeric" value="${l}"><div class="ekpm">${['Naqd', 'Plastik', 'Perechisleniye'].map((m, i) => `<button data-m="${m}" class="${i ? '' : 'on'}">${m}</button>`).join('')}</div>
         <button class="btn" data-x="paygo">💾 ${money(l)} so'm olindi</button></div>` : ''}
     </div>`;
   };
@@ -789,7 +789,7 @@ async function ekspHome() {
       b.innerHTML = `<div class="card ekcash" data-a><small>Bugun olingan pul (kassaga topshiriladi)</small><b>${money(cs)} so'm</b>
           ${ks.map(k => `<div class="row"><span>${esc(k)} · ${C[k].n} ta</span><b>${money(C[k].s)}</b></div>`).join('') || '<div class="mut">Hali pul olinmagan</div>'}</div>
         ${owe.length ? `<h3 class="vt2" data-a>⚠️ Yetkazildi, lekin to'liq to'lanmagan</h3>${owe.map(card).join('')}` : ''}
-        ${paid.length ? `<h3 class="vt2" data-a>💵 Pul olingan zakaslar</h3>${paid.map(o => `<div class="card strow"><div><b>${esc(o.client)}</b><div class="mut">№${o.id}</div></div><b>${money(o.paid)}</b></div>`).join('')}` : ''}`;
+        ${paid.length ? `<h3 class="vt2" data-a>💵 Pul olingan zakaslar</h3>${paid.map(o => `<div class="card strow"><div><b>${esc(o.client)}</b><div class="mut">№${esc(o.no || o.id)}</div></div><b>${money(o.paid)}</b></div>`).join('')}` : ''}`;
     } else if (E.tab === 'sent' || E.tab === 'otk') { otkList(b); return; }
     else {
       const act = it.filter(o => o.status !== 3), dl = it.filter(o => o.status === 3);
@@ -799,14 +799,14 @@ async function ekspHome() {
     bind();
   };
   const bind = () => $$('#ekbody .ekc').forEach(c => {
-    const id = +c.dataset.o, o = D.items.find(x => x.id === id);
+    const id = c.dataset.o, o = D.items.find(x => String(x.id) === id); if (!o) return;
     c.querySelectorAll('[data-x]').forEach(x => x.onclick = async e => {
       e.stopPropagation(); buzz(); const k = x.dataset.x;
-      if (k === 'items' || k === 'pay') { E.open[id] = E.open[id] === k ? '' : k; draw(); if (k === 'pay') { const i = $('#pa' + id); i && i.focus(); } return; }
-      if (k === 'otk') { S.otk = { client: o.client, no: String(id), photos: [], comment: '' }; otkNew(); return; }
-      if (k === 'dlv') { if (!confirm(`№${id} · ${o.client}\nYetkazildi deb belgilansinmi?`)) return;
+      if (k === 'items' || k === 'pay') { E.open[id] = E.open[id] === k ? '' : k; draw(); if (k === 'pay') { const cc = $$('#ekbody .ekc').find(z => z.dataset.o === id), i = cc && cc.querySelector('.pain'); i && i.focus(); } return; }
+      if (k === 'otk') { S.otk = { client: o.client, no: String(o.no || id), photos: [], comment: '' }; otkNew(); return; }
+      if (k === 'dlv') { if (!confirm(`№${o.no || id} · ${o.client}\nYetkazildi deb belgilansinmi?`)) return;
         try { await api('/api/eksp/act', { method: 'POST', json: { oid: id, kind: 'delivered' } }); o.status = 3; o.pending = true; toast('✅ Yetkazildi'); E.open[id] = left(o) > 0 ? 'pay' : ''; draw(); } catch (er) { toast(er.message); } return; }
-      if (k === 'paygo') { const amt = +String($('#pa' + id).value).replace(/[^\d.]/g, ''), m = (c.querySelector('.ekpm .on') || {}).dataset;
+      if (k === 'paygo') { const amt = +String(c.querySelector('.pain').value).replace(/[^\d.]/g, ''), m = (c.querySelector('.ekpm .on') || {}).dataset;
         if (!amt) return toast('Summani kiriting');
         try { await api('/api/eksp/act', { method: 'POST', json: { oid: id, kind: 'cash', amount: amt, pay: m ? m.m : 'Naqd' } }); toast(`💵 ${money(amt)} so'm yozildi`); E.open[id] = ''; sig = ''; load(); } catch (er) { toast(er.message); } }
     });
@@ -923,7 +923,11 @@ async function narxView() {
   };
   $$('#ntabs .tab').forEach(t => t.onclick = () => { buzz(); kind = t.dataset.k; $$('#ntabs .tab').forEach(x => x.classList.toggle('on', x === t)); draw(); });
   $('#nt').onchange = draw; $('#nq').oninput = draw;
-  if (!snap.types.length) { $('#nlist').innerHTML = '<div class="mut">Narx ma\'lumoti hali yuklanmagan. Jarvis\'da «Sales Doctor\'dan olish» tugmasini bosing.</div>'; return; }
+  if (!snap.types.length) { $('#ntabs').style.display = 'none'; $('#nt').style.display = 'none';
+    $('#nlist').innerHTML = '<div class="mut">Narxlar hali kelmagan — kompyuterda Jarvis yoqilgach 1 daqiqa ichida o\'zi keladi. Keyin shu yerga qayta kiring.</div>'; return; }
+  if (!snap.types.some(t => t.kind === 'buy')) $('#ntabs').style.display = 'none';      // kirim narxi yo'q (ekspeditor) — tab kerak emas
+  if (!snap.types.some(t => t.kind === 'sale')) { kind = 'buy'; $$('#ntabs .tab').forEach(x => x.classList.toggle('on', x.dataset.k === 'buy')); }
+  if ((snap.only || []).length) $('#nq').insertAdjacentHTML('beforebegin', `<div class="mut" style="margin:-4px 0 8px">🔗 ${esc(snap.only.map(x => x.replace(/\s*\(.*?\)\s*/g, ' ').trim()).join(', '))} narxi</div>`);
   draw();
 }
 
