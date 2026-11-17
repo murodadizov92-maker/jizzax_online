@@ -653,15 +653,54 @@ async function statsView(focus) {
 }
 
 /* ================================================================== VOZVRAT (skladchi) */
-const RST = { pending: ['⏳ Tasdiq kutilmoqda', 'new'], approved: ['✅ Tasdiqlandi', 'delivered'], rejected: ['❌ Rad etildi', 'rej'] };
+const RST = { pending: ['⏳ Tasdiq kutilmoqda', 'new'], approved: ['✅ Tasdiqlandi', 'delivered'], rejected: ['❌ Rad etildi', 'rej'], eksp: ['📦 Skladda kutilmoqda', 'new'] };
+// ekspeditor ko'radigan holatlar (vozvrat / otkaz)
+const EKST = { eksp: ['📦 Skladchi qabul qilishi kutilmoqda', 'new'], pending: ['✅ Qabul qilindi · admin tasdig\'i kutilmoqda', 'new'], accepted: ['✅ Qabul qilindi · admin tasdig\'i kutilmoqda', 'new'],
+  approved: ['✅ Tasdiqlandi', 'delivered'], rejected: ['❌ Rad etildi', 'rej'], sent: ['✅ Guruhga ketdi', 'delivered'] };
+const PHC = {};
+async function phLoad(root) {                       // himoyalangan rasmlar (token bilan) -> <img data-ph>
+  for (const im of (root || document).querySelectorAll('img[data-ph]')) {
+    const id = im.dataset.ph; if (im.src && im.dataset.ok) continue;
+    try {
+      if (!PHC[id]) { const h = { 'X-Init-Data': tg ? tg.initData : '' }; if (DEV) h['X-Dev-User'] = DEV; if (APP && tokenGet()) h['X-App-Token'] = tokenGet();
+        const r = await fetch('/api/photo/' + id + '.jpg', { headers: h }); if (!r.ok) continue; PHC[id] = URL.createObjectURL(await r.blob()); }
+      im.src = PHC[id]; im.dataset.ok = 1; im.onclick = () => { const z = document.createElement('div'); z.className = 'phzoom'; z.innerHTML = `<img src="${PHC[id]}">`; z.onclick = () => z.remove(); document.body.appendChild(z); };
+    } catch (e) {}
+  }
+}
+const phRow = ids => (ids || []).length ? `<div class="phrow">${ids.map(p => `<img data-ph="${esc(p)}" alt="">`).join('')}</div>` : '';
 async function retHome() {
   clearTimer(); setBack(null); updateCartBar(false); setDock('home'); banner && banner.setProgress(null); useMode('ret');
   S.stab = S.stab || 'ret';
   render(`
     <div class="sk2" data-a><button class="btn retbtn" id="rnew">↩️ Vozvrat</button><button class="btn otkbtn" id="onew">🚫 Otkaz zakas</button></div>
+    <div id="inbox" data-a></div>
     <div class="tabs" data-a><i class="pill"></i><div class="tab ${S.stab === 'ret' ? 'on' : ''}" data-t="ret">Vozvratlar</div><div class="tab ${S.stab === 'otk' ? 'on' : ''}" data-t="otk">Otkazlar</div></div>
     <div id="list"><div class="sk"></div><div class="sk"></div></div>`);
-  $('#rnew').onclick = retNew; $('#onew').onclick = otkNew;
+  $('#rnew').onclick = () => { S.ret = { agent: '', client: '', ptype: '', photos: [], comment: '' }; retNew(); }; $('#onew').onclick = () => { S.otk = null; otkNew(); };
+  let isig = '';
+  const inbox = async () => {                       // ekspeditordan kelgan, qabul kutayotgan vozvrat va otkazlar
+    try {
+      const [a, b] = await Promise.all([api('/api/returns'), api('/api/otkaz')]);
+      const R = a.items.filter(r => r.status === 'eksp'), O = b.items.filter(o => o.status === 'eksp');
+      const ns = JSON.stringify([R.map(r => r.id), O.map(o => o.id)]); if (ns === isig) return; isig = ns;
+      const box = $('#inbox'); if (!box) return;
+      box.innerHTML = (R.length || O.length) ? `<h3 class="vt2">📥 Ekspeditordan kelgan · ${R.length + O.length}</h3>` +
+        R.map(r => `<div class="card inb"><div class="row"><b>↩️ R-${r.id} · ${esc(r.client_name)}</b><span class="badge s-new">Yangi</span></div>
+          <div class="mut">🚚 ${esc(r.eksp_name || r.user_name)} · ${new Date(r.created * 1000).toLocaleString('uz', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+          ${r.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(r.comment)}</div>` : ''}${phRow(r.eksp_photos)}
+          <button class="btn retbtn" data-ra="${r.id}" style="margin-top:8px">📦 Tekshirib qabul qilish</button></div>`).join('') +
+        O.map(o => `<div class="card inb"><div class="row"><b>🚫 Zakas № ${esc(o.order_no)} · ${esc(o.client_name)}</b><span class="badge s-new">Yangi</span></div>
+          <div class="mut">🚚 ${esc(o.user_name)} · ${new Date(o.created * 1000).toLocaleString('uz', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+          ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}${phRow(o.photos)}
+          <button class="btn otkbtn" data-oa="${o.id}" style="margin-top:8px">🧾 Nakladnoy bilan qabul qilish</button></div>`).join('') : '';
+      phLoad(box);
+      $$('#inbox [data-ra]').forEach(x => x.onclick = () => { const r = R.find(y => y.id === +x.dataset.ra); buzz('medium');
+        S.cart = {}; S.runit = {}; saveCart(); S.ret = { agent: '', client: r.client_name, ptype: '', photos: [], comment: r.comment || '', fromEksp: r.id, eph: r.eksp_photos, ename: r.eksp_name || r.user_name }; retNew(); });
+      $$('#inbox [data-oa]').forEach(x => x.onclick = () => { buzz('medium'); otkAccept(O.find(y => y.id === +x.dataset.oa)); });
+    } catch (e) {}
+  };
+  inbox();
   setTimeout(paintTabsPill, 30);
   let sig = '';
   $$('.tab').forEach(t => t.onclick = () => { S.stab = t.dataset.t; $$('.tab').forEach(x => x.classList.toggle('on', x === t)); paintTabsPill(); buzz(); sig = ''; load(); });
@@ -669,8 +708,9 @@ async function retHome() {
   const load = async () => {
     const tab = S.stab;
     try {
-      const { items } = await api(tab === 'ret' ? '/api/returns' : '/api/otkaz');
+      let { items } = await api(tab === 'ret' ? '/api/returns' : '/api/otkaz');
       if (tab !== S.stab) return;
+      items = items.filter(x => x.status !== 'eksp');      // ular yuqorida — «Ekspeditordan kelgan»
       const ns = tab + JSON.stringify(items.map(r => [r.id, r.status || r.sent])); if (ns === sig) return; sig = ns;
       $('#list').innerHTML = !items.length ? `<div class="mut" style="text-align:center;padding:30px">${tab === 'ret' ? 'Hali vozvrat kiritilmagan' : 'Hali otkaz kiritilmagan'}</div>` : tab === 'ret' ? items.map(r => `
         <div class="card rise">
@@ -681,13 +721,13 @@ async function retHome() {
           ${r.status === 'rejected' && r.reason ? `<div class="stk out" style="margin-top:6px">Sabab: ${esc(r.reason)}</div>` : ''}
         </div>`).join('') : items.map(o => `
         <div class="card rise otkcard">
-          <div class="row"><b>🚫 Zakas № ${esc(o.order_no)}</b><span class="badge ${o.sent ? 's-delivered' : 's-new'}">${o.sent ? '✅ Guruhga ketdi' : '📋 Saqlandi'}</span></div>
-          <div class="mut">🏪 ${esc(o.client_name)} · ${tm(o.created)} · 📷 ${o.photos.length}</div>
-          ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}
+          <div class="row"><b>🚫 Zakas № ${esc(o.order_no)}</b><span class="badge s-${(EKST[o.status] || EKST.sent)[1]}">${o.status === 'sent' ? (o.sent ? '✅ Guruhga ketdi' : '📋 Saqlandi') : (EKST[o.status] || [o.status])[0]}</span></div>
+          <div class="mut">🏪 ${esc(o.client_name)} · ${tm(o.created)} · 📷 ${o.photos.length}${o.eksp_uid ? ' · 🚚 ' + esc(o.user_name) : ''}</div>
+          ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}${o.reason ? `<div class="stk out" style="margin-top:6px">Sabab: ${esc(o.reason)}</div>` : ''}
         </div>`).join('');
     } catch (e) { $('#list').innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
   };
-  await load(); S.timer = setInterval(load, 25000);
+  await load(); S.timer = setInterval(() => { load(); inbox(); }, 20000);
 }
 
 /* ================================================================== EKSPEDITOR: otkaz + qarzdorlar */
@@ -703,10 +743,11 @@ async function ekspHome() {
     <div class="ekk" data-a><div class="card"><b id="kz">—</b><span>Zakas</span></div><div class="card"><b id="ky" style="color:#0f9d58">—</b><span>Yetkazildi</span></div><div class="card"><b id="kp" style="color:#e8710a">—</b><span>Olingan pul</span></div></div>
     <div class="eka" data-a>
       <button data-t="go"><i>🚚</i>Yetkazish</button><button data-t="cash"><i>💵</i>Pul</button>
-      <button id="ekdebt"><i>💰</i>Qarzdor</button><button id="ekotk"><i>🚫</i>Otkaz</button>
-      ${hasNarx() ? '<button id="eknarx"><i>💲</i>Narxlar</button>' : ''}<button data-t="otk"><i>📋</i>Otkazlarim</button></div>
+      <button id="ekret"><i>↩️</i>Qaytarish</button><button id="ekotk"><i>🚫</i>Otkaz</button>
+      <button id="ekdebt"><i>💰</i>Qarzdor</button>${hasNarx() ? '<button id="eknarx"><i>💲</i>Narxlar</button>' : ''}<button data-t="sent"><i>📋</i>Yuborganlarim</button></div>
     <div id="ekbody"><div class="sk"></div><div class="sk"></div></div>`);
   $('#ekdebt').onclick = () => { buzz(); debtView(); }; $('#ekotk').onclick = () => { buzz(); S.otk = null; otkNew(); };
+  $('#ekret').onclick = () => { buzz(); S.ekr = null; ekspRetNew(); };
   if ($('#eknarx')) $('#eknarx').onclick = () => { buzz(); narxView(); };
   const tabs = () => $$('.eka [data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === E.tab));
   $$('.eka [data-t]').forEach(b => b.onclick = () => { buzz(); E.tab = b.dataset.t; tabs(); draw(); });
@@ -749,7 +790,7 @@ async function ekspHome() {
           ${ks.map(k => `<div class="row"><span>${esc(k)} · ${C[k].n} ta</span><b>${money(C[k].s)}</b></div>`).join('') || '<div class="mut">Hali pul olinmagan</div>'}</div>
         ${owe.length ? `<h3 class="vt2" data-a>⚠️ Yetkazildi, lekin to'liq to'lanmagan</h3>${owe.map(card).join('')}` : ''}
         ${paid.length ? `<h3 class="vt2" data-a>💵 Pul olingan zakaslar</h3>${paid.map(o => `<div class="card strow"><div><b>${esc(o.client)}</b><div class="mut">№${o.id}</div></div><b>${money(o.paid)}</b></div>`).join('')}` : ''}`;
-    } else if (E.tab === 'otk') { otkList(b); return; }
+    } else if (E.tab === 'sent' || E.tab === 'otk') { otkList(b); return; }
     else {
       const act = it.filter(o => o.status !== 3), dl = it.filter(o => o.status === 3);
       b.innerHTML = (act.length ? `<div class="row vt2" data-a><b>Keyingi manzillar</b><span class="mut">${act.length} ta qoldi</span></div>${act.map(card).join('')}` : `<div class="card" style="text-align:center;padding:24px" data-a>🎉 ${it.length ? 'Hammasi yetkazildi!' : 'Bugun sizga biriktirilgan zakas yo\'q'}</div>`)
@@ -779,17 +820,84 @@ async function ekspHome() {
   };
   await load(); S.timer = setInterval(load, 30000);
 }
-async function otkList(box) {                         // ekspeditorning otkazlari (oldingi bosh sahifadagi ro'yxat)
+async function otkList(box) {                         // ekspeditor yuborgan vozvrat va otkazlar — holati bilan
   box.innerHTML = '<div class="sk"></div>';
   try {
-    const { items } = await api('/api/otkaz');
-    box.innerHTML = items.length ? items.map(o => `
+    const [a, b] = await Promise.all([api('/api/returns'), api('/api/otkaz')]);
+    const L = a.items.map(r => ({ ...r, k: 'r' })).concat(b.items.map(o => ({ ...o, k: 'o' }))).sort((x, y) => y.created - x.created);
+    box.innerHTML = L.length ? L.map(x => { const st = EKST[x.status] || EKST.sent; return `
       <div class="card rise otkcard">
-        <div class="row"><b>🚫 Zakas № ${esc(o.order_no)}</b><span class="badge ${o.sent ? 's-delivered' : 's-new'}">${o.sent ? '✅ Guruhga ketdi' : '📋 Saqlandi'}</span></div>
-        <div class="mut">🏪 ${esc(o.client_name)} · ${tmS(o.created)} · 📷 ${o.photos.length}</div>
-        ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}
-      </div>`).join('') : '<div class="mut" style="text-align:center;padding:30px">Hali otkaz kiritilmagan</div>';
+        <b>${x.k === 'r' ? `↩️ Vozvrat R-${x.id}` : `🚫 Otkaz · zakas № ${esc(x.order_no)}`}</b><div style="margin:4px 0 2px"><span class="badge s-${st[1]}">${st[0]}</span></div>
+        <div class="mut">🏪 ${esc(x.client_name)} · ${tmS(x.created)}${x.k === 'r' && x.total ? ' · ' + money(x.total) + " so'm" : ''}${x.accepted_by ? ' · 📦 ' + esc(x.accepted_by) : ''}</div>
+        ${x.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(x.comment)}</div>` : ''}${x.reason ? `<div class="stk out" style="margin-top:6px">Sabab: ${esc(x.reason)}</div>` : ''}
+        ${phRow(x.k === 'r' ? x.eksp_photos : x.photos)}
+      </div>`; }).join('') : '<div class="mut" style="text-align:center;padding:30px">Hali hech narsa yuborilmagan</div>';
+    phLoad(box);
   } catch (e) { box.innerHTML = `<div class="mut">${esc(e.message)}</div>`; }
+}
+
+async function ekspRetNew() {                        // ekspeditor: vozvrat — mijoz nomi + rasm -> skladchiga
+  clearTimer(); setBack(ekspHome); updateCartBar(false); setDock(null);
+  const O = S.ekr = S.ekr || { client: '', photos: [], comment: '' };
+  const draw = () => {
+    render(`
+      <h2 data-a style="margin:4px 0 10px">↩️ Qaytarish (vozvrat)</h2>
+      <div class="card" data-a><b>🏪 Mijoz nomi</b><input id="rc" placeholder="Masalan: 25-do'kon, Anvar aka" autocomplete="off" value="${esc(O.client)}" style="margin-top:6px"></div>
+      <div class="card" data-a><b>📷 Qaytgan mahsulot rasmi</b>
+        <div class="mut" style="font-size:13px;margin-top:4px">Mahsulotni rasmga oling — skladchi shu rasm bo'yicha qabul qiladi.</div>
+        <div class="phgrid">${O.photos.map((u, i) => `<div class="ph"><img src="${u}" alt=""><button data-px="${i}">✕</button></div>`).join('')}
+          ${O.photos.length < 8 ? `<button class="phadd" id="shot"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>${O.photos.length ? 'Yana' : 'Rasmga olish'}</span></button>` : ''}</div></div>
+      <textarea id="rcm" rows="2" placeholder="💬 Izoh (ixtiyoriy): sababi" data-a>${esc(O.comment)}</textarea>
+      <button class="btn retbtn" id="rsend" data-a style="margin-top:12px">📤 Skladchiga yuborish</button>`);
+    $('#rc').oninput = e => { O.client = e.target.value; };
+    $('#rcm').oninput = e => { O.comment = e.target.value; };
+    $$('[data-px]').forEach(b => b.onclick = () => { O.photos.splice(+b.dataset.px, 1); buzz(); draw(); });
+    const shot = $('#shot'); if (shot) shot.onclick = () => openCamera(u => { if (O.photos.length >= 8) return; O.photos.push(u); O._dirty = true; });
+    $('#rsend').onclick = async () => {
+      const b = $('#rsend'); if (b.disabled) return;
+      if (O.client.trim().length < 2) { $('#rc').focus(); return toast('Mijoz nomini yozing'); }
+      if (!O.photos.length) return toast('Mahsulotni rasmga oling');
+      b.disabled = true; b.textContent = '⏳ Yuborilmoqda…';
+      try {
+        let rid = LS.get('ereq_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('ereq_id', rid); }
+        await api('/api/eksp/returns', { method: 'POST', retry: 2, timeout: 120000, json: { client_name: O.client, photos: O.photos, comment: O.comment, req_id: rid } });
+        LS.set('ereq_id', null); S.ekr = null; buzz('heavy'); confetti(); toast('✅ Skladchiga yuborildi'); if (S.ek) S.ek.tab = 'sent'; ekspHome();
+      } catch (e) { toast(e.message); b.disabled = false; b.textContent = '📤 Skladchiga yuborish'; }
+    };
+  };
+  draw();
+  const iv = setInterval(() => { if (S.ekr !== O || !document.getElementById('rsend')) return clearInterval(iv); if (!document.getElementById('cam') && O._dirty) { O._dirty = false; draw(); } }, 300);
+}
+
+async function otkAccept(o) {                        // skladchi: ekspeditor otkazini nakladnoy rasmi bilan qabul qiladi
+  clearTimer(); setBack(retHome); updateCartBar(false); setDock(null);
+  const N = { photos: [], comment: '' };
+  const draw = () => {
+    render(`
+      <h2 data-a style="margin:4px 0 10px">🚫 Otkazni qabul qilish</h2>
+      <div class="card otkcard" data-a><b>Zakas № ${esc(o.order_no)} · ${esc(o.client_name)}</b><div class="mut">🚚 ${esc(o.user_name)} · ${tmS(o.created)}</div>
+        ${o.comment ? `<div class="mut" style="font-size:12px">💬 ${esc(o.comment)}</div>` : ''}${phRow(o.photos)}</div>
+      <div class="card otkcard" data-a><b>🧾 Nakladnoy rasmi</b>
+        <div class="mut" style="font-size:13px;margin-top:4px">Qaytgan zakas nakladnoyini rasmga oling.</div>
+        <div class="phgrid">${N.photos.map((u, i) => `<div class="ph"><img src="${u}" alt=""><button data-px="${i}">✕</button></div>`).join('')}
+          ${N.photos.length < 6 ? `<button class="phadd otk" id="shot"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>${N.photos.length ? 'Yana' : 'Nakladnoyni rasmga olish'}</span></button>` : ''}</div></div>
+      <textarea id="ncm" rows="2" placeholder="💬 Izoh (ixtiyoriy)" data-a>${esc(N.comment)}</textarea>
+      <button class="btn otkbtn" id="nsend" data-a style="margin-top:12px">✅ Qabul qilindi</button>`);
+    phLoad(view);
+    $('#ncm').oninput = e => { N.comment = e.target.value; };
+    $$('[data-px]').forEach(b => b.onclick = () => { N.photos.splice(+b.dataset.px, 1); buzz(); draw(); });
+    const shot = $('#shot'); if (shot) shot.onclick = () => openCamera(u => { if (N.photos.length >= 6) return; N.photos.push(u); N._dirty = true; });
+    $('#nsend').onclick = async () => {
+      const b = $('#nsend'); if (b.disabled) return;
+      if (!N.photos.length) return toast('Nakladnoyni rasmga oling');
+      b.disabled = true; b.textContent = '⏳ Yuborilmoqda…';
+      try { await api(`/api/otkaz/${o.id}/accept`, { method: 'POST', retry: 2, timeout: 120000, json: { photos: N.photos, comment: N.comment } });
+        buzz('heavy'); confetti(); toast("✅ Qabul qilindi — admin tasdig'iga ketdi"); S.stab = 'otk'; retHome(); }
+      catch (e) { toast(e.message); b.disabled = false; b.textContent = '✅ Qabul qilindi'; }
+    };
+  };
+  draw();
+  const iv = setInterval(() => { if (!document.getElementById('nsend')) return clearInterval(iv); if (!document.getElementById('cam') && N._dirty) { N._dirty = false; draw(); } }, 300);
 }
 // Narxlar bo'limi: Jarvis'da "Narxlar: ko'rish" ruxsati berilgan xodimlarga (faqat o'qish)
 const hasNarx = () => !!S.me && (!!S.me.admin || (S.me.sections || []).some(x => x === 'narx' || x === 'narx_edit'));
@@ -839,7 +947,7 @@ async function debtView() {
     const L = r.items.filter(c => inAg(c) && (!q || hit(c)));            // agent ichida ham qidiriladi
     const sum = L.reduce((s, c) => s - (c.balance || 0), 0);
     const lbl = !ag ? 'Hamma agentlar · qarz' : ag === '__all' ? 'Hamma mijozlar · qarz' : esc(ag.replace(/\s*\(.*?\)\s*/g, ' ').trim()) + ' · qarz';
-    $('#bsum').innerHTML = `<div class="card balsum"><small>${lbl}</small><b>${money(ag ? sum : r.debt)} so'm</b><span>${ag ? L.length : r.n_debt} ta mijoz · ${agoAgo(r.t)}</span></div>`;
+    $('#bsum').innerHTML = `<div class="card balsum"><small>${lbl}</small><b>${money(ag ? sum : r.debt)} so'm</b><span>${ag ? L.length : r.n_debt} ta mijoz · ${agoAgo(r.t)}${r.src ? ' · ' + esc(r.src) : ''}</span>${(r.only || []).length ? `<span>🔗 Faqat: ${esc(r.only.map(x => x.replace(/\s*\(.*?\)\s*/g, ' ').trim()).join(', '))}</span>` : ''}</div>`;
     let html = '';
     if (ag) {
       html += `<button class="btn" id="bback" style="margin-bottom:10px">← Agentlar</button>` + (L.map(cl).join('') || '<div class="mut" style="padding:20px;text-align:center">Qarzdor topilmadi</div>');
@@ -859,18 +967,20 @@ async function debtView() {
     if (e.target.closest('#ball')) { ag = '__all'; buzz(); return draw(); }
   };
   $('#bq').oninput = draw;
-  $('#bref').onclick = async () => {
-    buzz();
-    const t0 = r.t;
-    try { await api('/api/debtors/refresh', { method: 'POST' }); } catch (e) { return toast(e.message); }
-    toast("Sales Doctor'dan yangilanmoqda… 1–2 daqiqa");
-    for (let i = 0; i < 20; i++) {
-      await new Promise(res => setTimeout(res, 6000));
-      try { const n = await api('/api/debtors'); if (n.t !== t0) { r = n; draw(); return toast('✅ Yangilandi'); } } catch (e) {}
+  let busy = false;
+  const refresh = async (silent) => {                 // Sales Doctor'dan yangi balanslar (Jarvis orqali)
+    if (busy) return; busy = true; if (!silent) buzz();
+    const btn = $('#bref'), t0 = r.t; if (btn) { btn.disabled = true; btn.textContent = '⏳ Sales Doctor\'dan olinmoqda…'; }
+    try { await api('/api/debtors/refresh', { method: 'POST' }); } catch (e) { busy = false; if (btn) { btn.disabled = false; btn.textContent = '🔄 Salesdan yangilash'; } return silent || toast(e.message); }
+    for (let i = 0; i < 30 && document.getElementById('bl'); i++) {
+      await new Promise(res => setTimeout(res, 4000));
+      try { const n = await api('/api/debtors'); if (n.t !== t0) { r = n; if (document.getElementById('bl')) draw(); toast('✅ Sales Doctor\'dan yangilandi'); break; } } catch (e) {}
     }
-    toast("Hali yangilanmadi, keyinroq qayting");
+    busy = false; const b2 = $('#bref'); if (b2) { b2.disabled = false; b2.textContent = '🔄 Salesdan yangilash'; }
   };
+  $('#bref').onclick = () => refresh(false);
   draw();
+  if (Date.now() / 1000 - (r.t || 0) > 60) refresh(true);    // kirganda o'zi yangilanadi (oxirgisi 1 daqiqadan eski bo'lsa)
 }
 
 async function otkNew() {                          // otkaz zakas: mijoz + zakas raqami + mahsulot rasmlari
@@ -887,7 +997,7 @@ async function otkNew() {                          // otkaz zakas: mijoz + zakas
         <div class="phgrid">${O.photos.map((u, i) => `<div class="ph"><img src="${u}" alt=""><button data-px="${i}">✕</button></div>`).join('')}
           ${O.photos.length < 10 ? `<button class="phadd otk" id="shot"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>${O.photos.length ? 'Yana' : 'Rasmga olish'}</span></button>` : ''}</div></div>
       <textarea id="ocm" rows="2" placeholder="💬 Izoh (ixtiyoriy): sababi" data-a>${esc(O.comment)}</textarea>
-      <button class="btn otkbtn" id="osend" data-a style="margin-top:12px">🚫 Otkazni yuborish</button>`);
+      <button class="btn otkbtn" id="osend" data-a style="margin-top:12px">${S.me.role === 'eksp' ? '📤 Skladchiga yuborish' : '🚫 Otkazni yuborish'}</button>`);
     $('#oc').oninput = e => { O.client = e.target.value; };
     $('#on').oninput = e => { O.no = e.target.value; };
     $('#ocm').oninput = e => { O.comment = e.target.value; };
@@ -903,7 +1013,7 @@ async function otkNew() {                          // otkaz zakas: mijoz + zakas
         let rid = LS.get('oreq_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('oreq_id', rid); }
         const r = await api('/api/otkaz', { method: 'POST', retry: 2, timeout: 120000, json: { client_name: O.client, order_no: O.no, photos: O.photos, comment: O.comment, req_id: rid } });
         LS.set('oreq_id', null); S.otk = null; buzz('heavy'); confetti();
-        toast(r.warn ? '✅ Saqlandi (guruhga ketmadi: ' + r.warn + ')' : '✅ Otkaz guruhga yuborildi'); S.stab = 'otk'; otkBack();
+        toast(r.to_sklad ? '✅ Skladchiga yuborildi' : r.warn ? '✅ Saqlandi (guruhga ketmadi: ' + r.warn + ')' : '✅ Otkaz guruhga yuborildi'); S.stab = 'otk'; if (S.ek) S.ek.tab = 'sent'; otkBack();
       } catch (e) { toast(e.message); b.disabled = false; b.textContent = '🚫 Otkazni yuborish'; }
     };
   };
@@ -915,12 +1025,14 @@ async function retNew() {
   clearTimer(); setBack(retHome); updateCartBar(false); setDock('new'); useMode('ret');
   render(`
     <div class="steps" data-a><span class="on">1. Agent</span><span>2. Mahsulot</span><span>3. Tasdiq</span></div>
+    ${S.ret.fromEksp ? `<div class="card retcard inb" data-a><b>🚚 Ekspeditordan: R-${S.ret.fromEksp} · ${esc(S.ret.client)}</b><div class="mut">${esc(S.ret.ename || '')} yubordi · mijoz nomi o'zgarmaydi${S.ret.comment ? ' · 💬 ' + esc(S.ret.comment) : ''}</div>${phRow(S.ret.eph)}</div>` : ''}
     <div class="nchead" data-a>Qaysi agentning mijozi qaytardi?</div>
     <div id="agl" data-a><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
     <div class="card" data-a><b>🏪 Mijoz (do'kon) nomi</b>
-      <input id="rcl" placeholder="Masalan: 25-do'kon, Anvar aka" autocomplete="off" value="${esc(S.ret.client)}" style="margin-top:8px">
-      <div class="mut" style="font-size:12px;margin-top:6px">Bilganingizcha yozing — admin tasdiqlashda bazadagi mijozga bog'laydi.</div></div>
+      <input id="rcl" placeholder="Masalan: 25-do'kon, Anvar aka" autocomplete="off" value="${esc(S.ret.client)}" style="margin-top:8px" ${S.ret.fromEksp ? 'readonly' : ''}>
+      <div class="mut" style="font-size:12px;margin-top:6px">${S.ret.fromEksp ? 'Ekspeditor yozganidek qoladi.' : 'Bilganingizcha yozing — admin tasdiqlashda bazadagi mijozga bog\'laydi.'}</div></div>
     <button class="btn" id="rgo" data-a>Davom etish →</button>`);
+  phLoad(view);
   let agents = [];
   try { agents = (await api('/api/ret/agents')).items; } catch (e) { $('#agl').innerHTML = `<div class="mut">${esc(e.message)}</div>`; return; }
   const draw = () => {
@@ -928,9 +1040,9 @@ async function retNew() {
     $$('#agl [data-ag]').forEach(el => el.onclick = () => { buzz('medium'); if (S.ret.agent !== el.dataset.ag) { S.cart = {}; saveCart(); } S.ret.agent = el.dataset.ag; draw(); });
   };
   draw();
-  $('#rcl').oninput = e => { S.ret.client = e.target.value; };
+  $('#rcl').oninput = e => { if (!S.ret.fromEksp) S.ret.client = e.target.value; };
   $('#rgo').onclick = () => {
-    S.ret.client = $('#rcl').value.trim();
+    if (!S.ret.fromEksp) S.ret.client = $('#rcl').value.trim();
     if (!S.ret.agent) return toast('Agentni tanlang');
     if (S.ret.client.length < 2) { $('#rcl').focus(); return toast('Mijoz nomini yozing'); }
     buzz('medium'); pickProducts();
@@ -976,15 +1088,15 @@ function retConfirm() {
     const rows = Object.entries(S.cart).map(([id, q]) => ({ p: S.products.find(p => p.id === id), id, q })).filter(r => r.p);
     render(`
       <div class="steps" data-a><span>1. Agent</span><span id="toPick" style="cursor:pointer">2. Mahsulot</span><span class="on">3. Tasdiq</span></div>
-      <div class="card retcard" data-a><b>↩️ ${esc(S.ret.client)}</b><div class="mut">🧑‍💼 ${esc(S.ret.agent)}${S.ret.ptype ? ' · 💲 ' + esc(S.ret.ptype) : ''}</div></div>
+      <div class="card retcard" data-a><b>↩️ ${esc(S.ret.client)}</b><div class="mut">🧑‍💼 ${esc(S.ret.agent)}${S.ret.ptype ? ' · 💲 ' + esc(S.ret.ptype) : ''}${S.ret.fromEksp ? ' · 🚚 ' + esc(S.ret.ename || '') + ' (R-' + S.ret.fromEksp + ')' : ''}</div>${S.ret.fromEksp ? phRow(S.ret.eph) : ''}</div>
       <button class="btn addmore" id="addMore" data-a>➕ Yana mahsulot qo'shish</button>
       ${rows.map(r => `<div class="card" data-a><div class="row"><b>${esc(r.p.name)}</b><button class="back" data-rm="${r.id}">✕</button></div>
         <div class="qty" style="margin:8px 0 6px"><button data-m="${r.id}">−</button><input type="number" step="any" inputmode="decimal" value="${r.q}" data-i="${r.id}"><button data-p="${r.id}">+</button><i class="un">${ru(r.p) === 'kg' ? 'kg' : 'dona'}</i></div>
         <div class="row"><span class="mut">${money(r.p.price)} so'm × ${fq(r.q)} ${ru(r.p) === 'kg' ? 'kg' : 'dona'}</span><b>${money(r.p.price * r.q)} so'm</b></div></div>`).join('') || '<div class="mut" data-a>Hech narsa tanlanmagan</div>'}
       <textarea id="cm" rows="2" placeholder="💬 Sabab / izoh (masalan: muddati o'tgan, sifatsiz)" data-a>${esc(S.ret.comment)}</textarea>
       <div class="row" style="margin:14px 0" data-a><span>Jami</span><span class="sum"><span id="tot">0</span> so'm</span></div>
-      <button class="btn retbtn" id="send" data-a ${rows.length ? '' : 'disabled'}>↩️ Qaytarishni tasdiqqa yuborish</button>`);
-    countTo($('#tot'), cartSum(), { dur: 600 });
+      <button class="btn retbtn" id="send" data-a ${rows.length ? '' : 'disabled'}>${S.ret.fromEksp ? '✅ Qabul qilindi' : '↩️ Qaytarishni tasdiqqa yuborish'}</button>`);
+    countTo($('#tot'), cartSum(), { dur: 600 }); phLoad(view);
     const chg = (id, v) => { v = Math.max(0, +(+v || 0).toFixed(3)); if (v) S.cart[id] = v; else delete S.cart[id]; saveCart(); buzz(); draw(); };
     $('#addMore').onclick = () => { buzz(); pickProducts(); }; $('#toPick').onclick = () => pickProducts();
     $('#cm').oninput = e => { S.ret.comment = e.target.value; };
@@ -998,9 +1110,11 @@ function retConfirm() {
       try {
         let rid = LS.get('rreq_id'); if (!rid) { rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); LS.set('rreq_id', rid); }
         const items = Object.entries(S.cart).map(([id, qty]) => ({ id, qty, unit: S.runit[id] || (S.products.find(p => p.id === id) || {}).unit }));
-        const res = await api('/api/returns', { method: 'POST', retry: 2, timeout: 120000, json: { agent: S.ret.agent, client_name: S.ret.client, items, comment: S.ret.comment, req_id: rid } });
+        const fe = S.ret.fromEksp;
+        const res = fe ? await api(`/api/returns/${fe}/accept`, { method: 'POST', retry: 2, timeout: 120000, json: { agent: S.ret.agent, items, comment: S.ret.comment } })
+          : await api('/api/returns', { method: 'POST', retry: 2, timeout: 120000, json: { agent: S.ret.agent, client_name: S.ret.client, items, comment: S.ret.comment, req_id: rid } });
         LS.set('rreq_id', null); S.cart = {}; S.runit = {}; saveCart(); S.ret = { agent: '', client: '', ptype: '', photos: [], comment: '' };
-        buzz('heavy'); confetti(); toast(res.duplicate ? 'Avval yuborilgan edi ✅' : `✅ Vozvrat R-${res.ret.id} tasdiqqa yuborildi`); retHome();
+        buzz('heavy'); confetti(); toast(res.duplicate ? 'Avval yuborilgan edi ✅' : fe ? `✅ R-${res.ret.id} qabul qilindi — admin tasdig'iga ketdi` : `✅ Vozvrat R-${res.ret.id} tasdiqqa yuborildi`); retHome();
       } catch (e) { toast(e.network ? e.message + ' — ma\'lumot saqlangan' : e.message); b.disabled = false; b.textContent = txt; }
     };
   };
