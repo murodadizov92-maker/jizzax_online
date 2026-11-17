@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS stock(
   key TEXT PRIMARY KEY, name TEXT, qty REAL, unit TEXT DEFAULT '', src TEXT, updated INTEGER);
 CREATE TABLE IF NOT EXISTS pmeta(pid TEXT PRIMARY KEY, unit TEXT);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS eksp_link(login TEXT PRIMARY KEY, exp TEXT, agents TEXT, ptypes TEXT, updated INTEGER);
 CREATE TABLE IF NOT EXISTS eksp_acts(id INTEGER PRIMARY KEY AUTOINCREMENT, oid INTEGER, kind TEXT, amount REAL DEFAULT 0, pay TEXT,
   note TEXT, uid INTEGER, user TEXT, exp TEXT, client TEXT, created INTEGER, done INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS app_tokens(th TEXT PRIMARY KEY, tg_id INTEGER, created INTEGER, last_used INTEGER, device TEXT);
@@ -108,7 +109,23 @@ for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
              "ALTER TABLE returns ADD COLUMN paid_at INTEGER DEFAULT 0",        # SD'da balansdan ayirildi (Возврат с полки)
              "ALTER TABLE orders ADD COLUMN req_id TEXT DEFAULT ''",
              "ALTER TABLE clients ADD COLUMN balance REAL",                   # Jarvis'dan: mijoz balansi (manfiy = qarz)
-             "ALTER TABLE clients ADD COLUMN bal_t INTEGER DEFAULT 0"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
+             "ALTER TABLE clients ADD COLUMN bal_t INTEGER DEFAULT 0",
+             # ekspeditor -> skladchi -> admin zanjiri (vozvrat va otkaz)
+             "ALTER TABLE returns ADD COLUMN eksp_uid INTEGER DEFAULT 0",
+             "ALTER TABLE returns ADD COLUMN eksp_name TEXT DEFAULT ''",
+             "ALTER TABLE returns ADD COLUMN eksp_photos TEXT DEFAULT '[]'",
+             "ALTER TABLE returns ADD COLUMN accepted_at INTEGER DEFAULT 0",
+             "ALTER TABLE returns ADD COLUMN accepted_by TEXT DEFAULT ''",
+             "ALTER TABLE returns ADD COLUMN sklad_uid INTEGER DEFAULT 0",
+             "ALTER TABLE otkaz ADD COLUMN status TEXT DEFAULT 'sent'",
+             "ALTER TABLE otkaz ADD COLUMN eksp_uid INTEGER DEFAULT 0",
+             "ALTER TABLE otkaz ADD COLUMN nakl TEXT DEFAULT '[]'",
+             "ALTER TABLE otkaz ADD COLUMN accepted_at INTEGER DEFAULT 0",
+             "ALTER TABLE otkaz ADD COLUMN accepted_by TEXT DEFAULT ''",
+             "ALTER TABLE otkaz ADD COLUMN sklad_uid INTEGER DEFAULT 0",
+             "ALTER TABLE otkaz ADD COLUMN approved_at INTEGER DEFAULT 0",
+             "ALTER TABLE otkaz ADD COLUMN approved_by TEXT DEFAULT ''",
+             "ALTER TABLE otkaz ADD COLUMN reason TEXT DEFAULT ''"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
     try:
         db.execute(_sql)
     except sqlite3.OperationalError:
@@ -1005,9 +1022,33 @@ async def h_health(request):
 def _sections_of(uid):
     r = db.execute("SELECT m.secs FROM mc_sections m JOIN app_logins l ON l.login=m.login WHERE l.tg_id=?", (uid,)).fetchone()
     try:
-        return json.loads(r["secs"]) if r else []
+        secs = json.loads(r["secs"]) if r else []
     except Exception:
-        return []
+        secs = []
+    lk = _elink(uid)
+    if lk and lk["ptypes"] and "narx" not in secs:      # agentga biriktirilgan ekspeditor — o'sha agent narxini ko'radi
+        secs = secs + ["narx"]
+    return secs
+
+
+def _elink(uid):
+    """Ekspeditor (login) -> Jarvis «Jamoa > Ekspeditorlar»da biriktirilgan agentlar va narx turlari."""
+    r = db.execute("SELECT e.* FROM eksp_link e JOIN app_logins l ON l.login=e.login WHERE l.tg_id=?", (uid,)).fetchone()
+    if not r:
+        return None
+    try:
+        return {"exp": r["exp"] or "", "agents": json.loads(r["agents"] or "[]"), "ptypes": json.loads(r["ptypes"] or "[]")}
+    except Exception:
+        return None
+
+
+def _akey(v):
+    return set(w for w in translit(re.sub(r"\(.*?\)", " ", str(v or ""))).split() if len(w) > 1)
+
+
+def _same_agent(a, b):
+    ka, kb = _akey(a), _akey(b)
+    return bool(ka and kb and (ka <= kb or kb <= ka))
 
 
 async def h_me(request):
@@ -1380,7 +1421,10 @@ async def h_order_delete(request):
 PHOTO_DIR = Path(DB_PATH).parent / "photos"
 PHOTO_DIR.mkdir(parents=True, exist_ok=True)
 PHOTO_DDL = "CREATE TABLE IF NOT EXISTS oz_photos(pid TEXT PRIMARY KEY, data BYTEA, created TIMESTAMPTZ DEFAULT now())"
-RET_ST = {"pending": "⏳ Tasdiq kutilmoqda", "approved": "✅ Tasdiqlandi", "rejected": "❌ Rad etildi"}
+RET_ST = {"pending": "⏳ Tasdiq kutilmoqda", "approved": "✅ Tasdiqlandi", "rejected": "❌ Rad etildi",
+          "eksp": "📦 Skladchi qabul qilishi kutilmoqda"}
+OTK_ST = {"eksp": "📦 Skladchi qabul qilishi kutilmoqda", "accepted": "✅ Qabul qilindi · admin tasdig'i kutilmoqda",
+          "approved": "✅ Tasdiqlandi", "rejected": "❌ Rad etildi", "sent": "✅ Guruhga ketdi"}
 
 
 def ret_agents() -> list:
@@ -1505,6 +1549,7 @@ def row_ret(r) -> dict:
     d = dict(r)
     d["items"] = json.loads(d["items"] or "[]")
     d["photos"] = json.loads(d["photos"] or "[]")
+    d["eksp_photos"] = json.loads(d.get("eksp_photos") or "[]")
     d["status_text"] = RET_ST.get(d["status"], d["status"])
     return d
 
@@ -1576,11 +1621,12 @@ async def h_ret_create(request):
 
 async def h_ret_list(request):
     sql, args = "SELECT * FROM returns", []
-    if request["role"] == "eksp":
-        return web.json_response({"items": []})
-    if request["role"] == "sklad":
-        sql += " WHERE tg_id=?"
+    if request["role"] == "eksp":                 # ekspeditor: o'zi yuborgan vozvratlar (holati bilan)
+        sql += " WHERE eksp_uid=?"
         args.append(request["uid"])
+    elif request["role"] == "sklad":              # skladchi: o'zi kiritganlari + ekspeditordan kelgan (qabul kutayotgan)
+        sql += " WHERE tg_id=? OR sklad_uid=? OR status='eksp'"
+        args += [request["uid"], request["uid"]]
     elif request["role"] != "admin":              # agent: faqat o'z mijozlarining tasdiqlangan vozvratlari
         sql += " WHERE agent=? AND status='approved'"
         args.append(request["agent"])
@@ -1605,7 +1651,7 @@ async def send_return(r: dict) -> str:
     jpg = await asyncio.get_running_loop().run_in_executor(None, make_invoice, ret_full(r))
     cap = f"↩️ ВОЗВРАТ № R-{r['id']} · {r['client_name']} · {r['agent']}"
     files = [("vozvrat.jpg", jpg)]
-    for pid in r["photos"][:9]:
+    for pid in (r["photos"] + r.get("eksp_photos", []))[:9]:
         data = await photo_get(pid)
         if data:
             files.append((f"{pid}.jpg", data))
@@ -1736,7 +1782,7 @@ async def h_j_ret_approve(request):
     r = row_ret(db.execute("SELECT * FROM returns WHERE id=?", (rid,)).fetchone())
     err = await send_return(r)
     agent_users = [x["tg_id"] for x in db.execute("SELECT tg_id FROM access WHERE agent=?", (r["agent"],)).fetchall()]
-    add_note([r["tg_id"]], "info", f"✅ Vozvrat #{rid} tasdiqlandi", f"{r['client_name']} · {money(r['total'])} so'm")
+    add_note([r["tg_id"], r.get("sklad_uid"), r.get("eksp_uid")], "info", f"✅ Vozvrat #{rid} tasdiqlandi", f"{r['client_name']} · {money(r['total'])} so'm")
     add_note(agent_users, "info", f"↩️ Mijozingizdan vozvrat #{rid}", f"{r['client_name']} · {money(r['total'])} so'm")
     return web.json_response({"ok": True, "ret": ret_full(r), "warn": err})
 
@@ -1750,7 +1796,7 @@ async def h_j_ret_reject(request):
         return web.json_response({"error": "Rad etib bo'lmaydi"}, status=400)
     db.execute("UPDATE returns SET status='rejected', reason=?, updated=? WHERE id=?", (reason, now(), rid))
     db.commit()
-    add_note([r["tg_id"]], "info", f"❌ Vozvrat #{rid} rad etildi", reason or r["client_name"])
+    add_note([r["tg_id"], r["sklad_uid"], r["eksp_uid"]], "info", f"❌ Vozvrat #{rid} rad etildi", reason or r["client_name"])
     return web.json_response({"ok": True})
 
 
@@ -1945,6 +1991,9 @@ async def h_j_agent_prices(request):
 def row_otk(r) -> dict:
     d = dict(r)
     d["photos"] = json.loads(d["photos"] or "[]")
+    d["nakl"] = json.loads(d.get("nakl") or "[]")
+    d["status"] = d.get("status") or "sent"
+    d["status_text"] = OTK_ST.get(d["status"], d["status"])
     return d
 
 
@@ -1955,11 +2004,14 @@ async def send_otkaz(o: dict) -> str:
     t = datetime.utcfromtimestamp(o["created"]) + timedelta(hours=5)
     cap = (f"🚫 ОТКАЗ · Zakas № {o['order_no']}\n🏪 {o['client_name']}\n📦 {o['user_name']} · {t:%d.%m.%Y %H:%M}"
            + (f"\n💬 {o['comment']}" if o.get("comment") else ""))
+    if o.get("accepted_by"):
+        cap += f"\n✅ Skladchi qabul qildi: {o['accepted_by']}"
     files = []
-    for pid in o["photos"]:
+    for pid in (o.get("nakl") or []) + o["photos"]:      # avval nakladnoy rasmi, keyin mahsulot rasmlari
         data = await photo_get(pid)
         if data:
             files.append((f"{pid}.jpg", data))
+    files = files[:10]
     if not files:
         return "Rasm topilmadi"
     err = await tg_album(chat, topic, files, cap)
@@ -1990,10 +2042,15 @@ async def h_otk_create(request):
         photos = await save_photos(b.get("photos"), limit=10)
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
-    cur = db.execute("INSERT INTO otkaz(tg_id,user_name,client_name,order_no,photos,comment,created,req_id) VALUES(?,?,?,?,?,?,?,?)",
-                     (request["uid"], request["uname"], cname, ono, json.dumps(photos), str(b.get("comment", ""))[:300], now(), req_id))
+    ek = request["role"] == "eksp"                # ekspeditor: avval skladchiga (guruhga emas)
+    cur = db.execute("INSERT INTO otkaz(tg_id,user_name,client_name,order_no,photos,comment,created,req_id,status,eksp_uid) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                     (request["uid"], request["uname"], cname, ono, json.dumps(photos), str(b.get("comment", ""))[:300], now(), req_id,
+                      "eksp" if ek else "sent", request["uid"] if ek else 0))
     db.commit()
     o = row_otk(db.execute("SELECT * FROM otkaz WHERE id=?", (cur.lastrowid,)).fetchone())
+    if ek:
+        add_note(_role_uids(SKLAD), "info", f"🚫 Ekspeditordan otkaz · zakas № {ono}", f"{cname} · 🚚 {request['uname']} — qabul qiling")
+        return web.json_response({"ok": True, "otkaz": o, "to_sklad": True})
     err = await send_otkaz(o)
     add_note([a for a in ADMIN_IDS if a != request["uid"]], "info", f"🚫 Otkaz · zakas № {ono}", f"{cname} · {len(photos)} ta rasm")
     o = row_otk(db.execute("SELECT * FROM otkaz WHERE id=?", (o["id"],)).fetchone())
@@ -2004,16 +2061,161 @@ async def h_otk_list(request):
     if request["role"] not in ("admin", "sklad", "eksp"):
         return web.json_response({"items": []})
     sql, args = "SELECT * FROM otkaz", []
-    if request["role"] in ("sklad", "eksp"):
+    if request["role"] == "eksp":
         sql += " WHERE tg_id=?"
         args.append(request["uid"])
+    elif request["role"] == "sklad":
+        sql += " WHERE tg_id=? OR sklad_uid=? OR status='eksp'"
+        args += [request["uid"], request["uid"]]
     return web.json_response({"items": [row_otk(r) for r in db.execute(sql + " ORDER BY id DESC LIMIT 150", args).fetchall()]})
+
+
+# ---------------------------------------------------------------- EKSPEDITOR -> SKLADCHI -> ADMIN (vozvrat va otkaz)
+def _role_uids(role_agent: str) -> list:
+    return [r["tg_id"] for r in db.execute("SELECT tg_id FROM access WHERE agent=?", (role_agent,)).fetchall()]
+
+
+async def h_eksp_ret_create(request):
+    """Ekspeditor: mijoz nomi + rasmlar -> skladchiga (status 'eksp'). Guruhga hali ketmaydi."""
+    if request["role"] not in ("admin", "eksp"):
+        return web.json_response({"error": "Faqat ekspeditor uchun"}, status=403)
+    b = await request.json()
+    req_id = re.sub(r"[^\w-]", "", str(b.get("req_id", "")))[:64]
+    if req_id:
+        dup = db.execute("SELECT * FROM returns WHERE eksp_uid=? AND req_id=?", (request["uid"], req_id)).fetchone()
+        if dup:
+            return web.json_response({"ok": True, "ret": row_ret(dup), "duplicate": True})
+    cname = re.sub(r"\s+", " ", str(b.get("client_name", ""))).strip()[:120]
+    if len(cname) < 2:
+        return web.json_response({"error": "Mijoz nomini yozing"}, status=400)
+    if not b.get("photos"):
+        return web.json_response({"error": "Qaytgan mahsulotni rasmga oling (kamida 1 ta)"}, status=400)
+    try:
+        photos = await save_photos(b.get("photos"), limit=8)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    cur = db.execute(
+        "INSERT INTO returns(tg_id,user_name,agent,ptype,client_name,client_typed,items,total,photos,comment,created,updated,req_id,"
+        "status,eksp_uid,eksp_name,eksp_photos) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (request["uid"], request["uname"], "", "", cname, cname, "[]", 0, "[]", str(b.get("comment", ""))[:300], now(), now(), req_id,
+         "eksp", request["uid"], request["uname"], json.dumps(photos)))
+    db.commit()
+    r = row_ret(db.execute("SELECT * FROM returns WHERE id=?", (cur.lastrowid,)).fetchone())
+    add_note(_role_uids(SKLAD), "info", f"↩️ Ekspeditordan vozvrat R-{r['id']}", f"{cname} · 🚚 {request['uname']} — qabul qiling")
+    return web.json_response({"ok": True, "ret": r})
+
+
+async def h_ret_accept(request):
+    """Skladchi: ekspeditor yuborgan vozvratni o'zi tekshirib kiritadi (agent, mahsulotlar). Mijoz nomi ekspeditor yozganidek qoladi."""
+    if request["role"] not in ("admin", "sklad"):
+        return web.json_response({"error": "Faqat skladchi qabul qiladi"}, status=403)
+    rid = int(request.match_info["id"])
+    r = db.execute("SELECT * FROM returns WHERE id=?", (rid,)).fetchone()
+    if not r:
+        return web.json_response({"error": "Vozvrat topilmadi"}, status=404)
+    if r["status"] != "eksp":
+        return web.json_response({"ok": True, "ret": row_ret(r), "duplicate": True})
+    b = await request.json()
+    agent = str(b.get("agent", "")).strip()
+    if agent not in ret_agents():
+        return web.json_response({"error": "Agentni tanlang"}, status=400)
+    catalog = {p["id"]: p for p in annotate(await get_products())}
+    items, total = ret_items(b.get("items"), agent, catalog)
+    if not items:
+        return web.json_response({"error": "Qaytarilgan mahsulotlar yo'q yoki miqdor noto'g'ri"}, status=400)
+    try:
+        photos = await save_photos(b.get("photos"))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    ptype, _ = agent_price_map(agent)
+    cm = str(b.get("comment", "")).strip()[:300] or (r["comment"] or "")
+    db.execute("UPDATE returns SET agent=?,ptype=?,items=?,total=?,photos=?,comment=?,status='pending',accepted_at=?,accepted_by=?,"
+               "sklad_uid=?,user_name=?,updated=? WHERE id=? AND status='eksp'",
+               (agent, ptype, json.dumps(items, ensure_ascii=False), total, json.dumps(photos), cm, now(), request["uname"],
+                request["uid"], request["uname"], now(), rid))
+    db.commit()
+    r = row_ret(db.execute("SELECT * FROM returns WHERE id=?", (rid,)).fetchone())
+    add_note([r["eksp_uid"]], "info", f"✅ Vozvrat R-{rid} qabul qilindi", f"{r['client_name']} · 📦 {request['uname']} · {money(total)} so'm")
+    add_note([a for a in ADMIN_IDS if a != request["uid"]], "info", f"↩️ Vozvrat R-{rid} tasdiq kutmoqda", f"{r['client_name']} · {agent} · {money(total)} so'm")
+    return web.json_response({"ok": True, "ret": r})
+
+
+async def h_otk_accept(request):
+    """Skladchi: ekspeditor yuborgan otkazni nakladnoy rasmi bilan qabul qiladi -> admin tasdig'iga."""
+    if request["role"] not in ("admin", "sklad"):
+        return web.json_response({"error": "Faqat skladchi qabul qiladi"}, status=403)
+    oid = int(request.match_info["id"])
+    o = db.execute("SELECT * FROM otkaz WHERE id=?", (oid,)).fetchone()
+    if not o:
+        return web.json_response({"error": "Otkaz topilmadi"}, status=404)
+    if (o["status"] or "sent") != "eksp":
+        return web.json_response({"ok": True, "otkaz": row_otk(o), "duplicate": True})
+    b = await request.json()
+    if not b.get("photos"):
+        return web.json_response({"error": "Nakladnoy rasmini oling"}, status=400)
+    try:
+        nk = await save_photos(b.get("photos"), limit=6)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    cm = str(b.get("comment", "")).strip()[:300]
+    db.execute("UPDATE otkaz SET nakl=?,status='accepted',accepted_at=?,accepted_by=?,sklad_uid=?,comment=CASE WHEN ?!='' THEN ? ELSE comment END "
+               "WHERE id=? AND status='eksp'", (json.dumps(nk), now(), request["uname"], request["uid"], cm, cm, oid))
+    db.commit()
+    o = row_otk(db.execute("SELECT * FROM otkaz WHERE id=?", (oid,)).fetchone())
+    add_note([o["eksp_uid"]], "info", f"✅ Otkaz № {o['order_no']} qabul qilindi", f"{o['client_name']} · 📦 {request['uname']}")
+    add_note([a for a in ADMIN_IDS if a != request["uid"]], "info", f"🚫 Otkaz № {o['order_no']} tasdiq kutmoqda", f"{o['client_name']} · skladchi qabul qildi")
+    return web.json_response({"ok": True, "otkaz": o})
+
+
+async def h_photo(request):
+    """Ilova: vozvrat/otkaz rasmlari (skladchi, ekspeditor, admin)."""
+    if request["role"] not in ("admin", "sklad", "eksp"):
+        raise web.HTTPForbidden()
+    pid = re.sub(r"[^\w-]", "", request.match_info["pid"])
+    data = await photo_get(pid)
+    if not data:
+        raise web.HTTPNotFound()
+    return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+async def h_j_otk_approve(request):
+    _jarvis_ok(request)
+    oid = int(request.match_info["id"])
+    b = await request.json() if request.can_read_body else {}
+    o = db.execute("SELECT * FROM otkaz WHERE id=?", (oid,)).fetchone()
+    if not o:
+        raise web.HTTPNotFound()
+    if (o["status"] or "sent") != "accepted":
+        return web.json_response({"error": "Bu otkaz tasdiqlash bosqichida emas"}, status=400)
+    if not kv_get("otk_chat"):
+        return web.json_response({"error": "Avval otkaz topigini belgilang (⚙️ Topik)"}, status=400)
+    db.execute("UPDATE otkaz SET status='approved',approved_at=?,approved_by=?,seen_at=? WHERE id=?",
+               (now(), str(b.get("by") or "Admin")[:60], now(), oid))
+    db.commit()
+    o = row_otk(db.execute("SELECT * FROM otkaz WHERE id=?", (oid,)).fetchone())
+    err = await send_otkaz(o)
+    add_note([o["eksp_uid"], o["sklad_uid"]], "info", f"✅ Otkaz № {o['order_no']} tasdiqlandi", o["client_name"])
+    return web.json_response({"ok": True, "otkaz": o, "warn": err})
+
+
+async def h_j_otk_reject(request):
+    _jarvis_ok(request)
+    oid = int(request.match_info["id"])
+    reason = str((await request.json()).get("reason", "")).strip()[:200]
+    o = db.execute("SELECT * FROM otkaz WHERE id=?", (oid,)).fetchone()
+    if not o or (o["status"] or "sent") in ("approved", "sent"):
+        return web.json_response({"error": "Rad etib bo'lmaydi"}, status=400)
+    db.execute("UPDATE otkaz SET status='rejected',reason=?,seen_at=? WHERE id=?", (reason, now(), oid))
+    db.commit()
+    add_note([o["eksp_uid"], o["sklad_uid"]], "info", f"❌ Otkaz № {o['order_no']} rad etildi", reason or o["client_name"])
+    return web.json_response({"ok": True})
+
 
 
 async def h_j_otkaz(request):
     _jarvis_ok(request)
     rows = db.execute("SELECT * FROM otkaz ORDER BY id DESC LIMIT 200").fetchall()
-    new = db.execute("SELECT COUNT(*) c FROM otkaz WHERE seen_at=0").fetchone()["c"]
+    new = db.execute("SELECT COUNT(*) c FROM otkaz WHERE (status='accepted') OR (IFNULL(status,'sent')='sent' AND seen_at=0)").fetchone()["c"]
     return web.json_response({"items": [row_otk(r) for r in rows], "new": new, "topic": bool(kv_get("otk_chat"))})
 
 
@@ -2137,12 +2339,14 @@ async def h_j_staff_delete(request):
 # ---------------------------------------------------------------- AGENT: mijoz balanslari + savdo hisoboti (Jarvis'dan har 10 daq.)
 async def h_j_balances(request):
     _jarvis_ok(request)
-    items = (await request.json()).get("items") or []
+    _bj = await request.json()
+    items, _bsrc = _bj.get("items") or [], _bj.get("src") or ""
     t = now()
     cur = db.executemany("UPDATE clients SET balance=?, bal_t=? WHERE ext_id=?",
                          [(float(x.get("bal") or 0), t, str(x.get("id"))) for x in items if x.get("id")])
     db.commit()
     kv_set("bal_t", str(t))
+    kv_set("bal_src", str(_bsrc)[:40])
     return web.json_response({"ok": True, "updated": cur.rowcount})
 
 
@@ -2192,6 +2396,11 @@ async def h_narx_list(request):
         return web.json_response({"error": "Narxlar bo'limi sizga berilmagan"}, status=403)
     r = db.execute("SELECT v FROM kv WHERE k='narx_snap'").fetchone()
     snap = json.loads(r["v"]) if r else {"t": 0, "types": [], "products": [], "prices": {}}
+    lk = _elink(request["uid"]) if request["role"] == "eksp" else None
+    if lk and lk["ptypes"]:                         # ekspeditor: faqat o'z agenti(lari)ning narx turi
+        snap["types"] = [t for t in snap.get("types") or [] if str(t.get("id")) in lk["ptypes"]]
+        snap["prices"] = {k: v for k, v in (snap.get("prices") or {}).items() if k in lk["ptypes"]}
+        snap["only"] = lk["agents"]
     snap["can_edit"] = False                       # tahrir faqat Jarvis kompyuterida (hozircha)
     return web.json_response(snap)
 
@@ -2230,6 +2439,9 @@ def _eksp_of(request, rows):
     names = sorted({r.get("exp") or "" for r in rows if r.get("exp")})
     if request["admin"] and request.query.get("exp"):
         return request.query["exp"], names
+    lk = _elink(request["uid"])
+    if lk and lk["exp"]:                              # Jarvis'da biriktirilgan
+        return lk["exp"], names
     mine = kv_get(f"eksp_of:{request['uid']}")
     if mine:
         return mine, names
@@ -2301,6 +2513,19 @@ async def h_eksp_act(request):
     return web.json_response({"ok": True})
 
 
+async def h_j_eksp_link(request):
+    _jarvis_ok(request)
+    b = await request.json()
+    login = str(b.get("login", "")).strip().lower()
+    if not login:
+        return web.json_response({"error": "login yo'q"}, status=400)
+    db.execute("INSERT OR REPLACE INTO eksp_link(login,exp,agents,ptypes,updated) VALUES(?,?,?,?,?)",
+               (login, str(b.get("exp", ""))[:80], json.dumps([str(x)[:80] for x in b.get("agents") or []], ensure_ascii=False),
+                json.dumps([str(x)[:40] for x in b.get("ptypes") or []]), now()))
+    db.commit()
+    return web.json_response({"ok": True})
+
+
 async def h_j_eksp_orders(request):
     _jarvis_ok(request)
     b = await request.json()
@@ -2331,13 +2556,17 @@ async def h_debtors(request):
         return web.json_response({"error": "Faqat ekspeditor uchun"}, status=403)
     rows = [dict(r) for r in db.execute("SELECT id,ext_id,name,region,address,phone,agent,balance FROM clients "
                                         "WHERE COALESCE(balance,0)<0 ORDER BY balance, name")]
+    lk = _elink(request["uid"]) if request["role"] == "eksp" else None
+    if lk and lk["agents"]:                         # ekspeditor: faqat o'z agenti(lari)ning mijozlari
+        rows = [r for r in rows if any(_same_agent(r["agent"], a) for a in lk["agents"])]
     by = {}
     for r in rows:
         a = by.setdefault(r["agent"] or "—", {"agent": r["agent"] or "—", "n": 0, "debt": 0})
         a["n"] += 1
         a["debt"] += -(r["balance"] or 0)
     return web.json_response({"items": rows, "debt": sum(-(r["balance"] or 0) for r in rows), "n_debt": len(rows),
-                              "agents": sorted(by.values(), key=lambda x: -x["debt"]), "t": int(kv_get("bal_t") or 0)})
+                              "agents": sorted(by.values(), key=lambda x: -x["debt"]), "t": int(kv_get("bal_t") or 0),
+                              "only": (lk or {}).get("agents") or [], "src": kv_get("bal_src") or ""})
 
 
 async def h_agent_stats(request):
@@ -2490,9 +2719,18 @@ def make_app():
         web.post("/api/eksp/pick", h_eksp_pick),
         web.post("/api/eksp/act", h_eksp_act),
         web.post("/jarvis/eksp_orders", h_j_eksp_orders),
+        web.post("/jarvis/eksp_link", h_j_eksp_link),
+        web.post("/api/eksp/returns", h_eksp_ret_create),
+        web.get("/api/photo/{pid}.jpg", h_photo),
+        web.post("/api/returns/{id}/accept", h_ret_accept),
+        web.post("/api/otkaz/{id}/accept", h_otk_accept),
+        web.post("/jarvis/otkaz/{id}/approve", h_j_otk_approve),
+        web.post("/jarvis/otkaz/{id}/reject", h_j_otk_reject),
         web.get("/jarvis/eksp_acts", h_j_eksp_acts),
+        web.post("/jarvis/eksp_acts", h_j_eksp_acts),
         web.post("/jarvis/eksp_ack", h_j_eksp_ack),
         web.post("/jarvis/bal_req", h_j_bal_req),
+        web.get("/jarvis/bal_req", h_j_bal_req),          # Jarvis (eski va yangi) GET bilan so'raydi
         web.get("/api/narx/list", h_narx_list),
         web.post("/jarvis/narx", h_j_narx),
         web.get("/api/agent/stats", h_agent_stats),
