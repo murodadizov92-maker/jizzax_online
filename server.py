@@ -176,9 +176,14 @@ def annotate(items: list) -> list:
     meta = {r["pid"]: r["unit"] for r in db.execute("SELECT pid,unit FROM pmeta").fetchall()}
     out = []
     amap = assign_stock(items, idx) if idx else {}
+    try:
+        fulln = json.loads(kv_get("full_names") or "{}")
+    except Exception:
+        fulln = {}
     for p in items:
         q = dict(p)
         row = amap.get(p["id"])
+        q["full"] = fulln.get(p["id"]) or (row["name"] if row else "") or p["name"]   # Sales Doctor'dagi to'liq nom
         q["stock"] = row["qty"] if row else None
         q["stock_unit"] = (row["unit"] if row else "") or ""
         q["unit"] = meta.get(p["id"]) or guess_unit(p, q["stock_unit"])
@@ -1850,22 +1855,39 @@ def read_price_xlsx(data: bytes) -> list:
     return out
 
 
+def _brand(s: str) -> str:
+    m = re.search(r"\*([^*]+)\*\s*$", s or "")
+    return re.sub(r"[^a-z0-9]", "", translit((m.group(1) if m else s or "").lower()))
+
+
+_FULLN: dict = {}                                 # mahsulot id -> Sales Doctor'dagi to'liq nomi (narx ro'yxatidan)
+
+
 def match_prices(rows: list, products: list):
-    """[(nom, narx)] -> {mahsulot_id: narx}. Nomdagi raqamlar (0,5 kg) bir xil bo'lishi shart."""
-    idx = [(p["id"],) + pkey(p["name"]) for p in products]
-    res, miss = {}, []
+    """[(nom, narx)] -> {mahsulot_id: narx}. Nomdagi raqamlar (0,5 kg) bir xil bo'lishi shart.
+    Brend (* HISLAT *) ham hisobga olinadi: bir xil nomli, lekin boshqa brenddagi tovar narxi aralashib ketmasin."""
+    idx = [(p["id"], _brand(p.get("category", ""))) + pkey(p["name"]) for p in products]
+    res, score, miss = {}, {}, []
     for name, price in rows:
         k, nums = pkey(name)
+        rb = _brand(name) if re.search(r"\*[^*]+\*\s*$", name or "") else ""
         best, bid = 0.0, None
-        for pid, k2, n2 in idx:
+        for pid, pb, k2, n2 in idx:
             if n2 != nums:
                 continue
             r = 1.0 if k == k2 else SequenceMatcher(None, k, k2).ratio()
+            if r < 0.88:
+                continue
+            if rb and pb:
+                if rb != pb:
+                    continue                     # boshqa brend — umuman olmaymiz
+                r += 1.0
             if r > best:
                 best, bid = r, pid
-        if bid and best >= 0.88:
-            res[bid] = price
-        else:
+        if bid and best > score.get(bid, 0):     # bitta tovarga bir nechta nom tushsa — eng mosi qoladi
+            res[bid], score[bid] = price, best
+            _FULLN[bid] = (name or "").strip()
+        elif not bid:
             miss.append(name)
     return res, miss
 
@@ -1906,6 +1928,14 @@ async def h_j_agent_prices(request):
         db.execute("INSERT OR REPLACE INTO agent_prices(agent,ptype,prices,updated) VALUES(?,?,?,?)",
                    (agent, ptype, json.dumps(prices), now()))
     db.commit()
+    if _FULLN:                                    # to'liq nomlarni saqlab qo'yamiz (ilovada ro'yxatdagidek chiqishi uchun)
+        try:
+            fn = json.loads(kv_get("full_names") or "{}")
+        except Exception:
+            fn = {}
+        fn.update(_FULLN)
+        kv_set("full_names", json.dumps(fn, ensure_ascii=False))
+        _FULLN.clear()
     return web.json_response({"ok": True, "matched": len(prices), "missed": len(miss), "missed_names": miss[:20]})
 
 
