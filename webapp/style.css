@@ -585,3 +585,9 @@ body:has(#cartbar:not(.hidden)) #dock{display:none!important}
 .phrow{display:flex;gap:6px;overflow-x:auto;margin-top:8px}.phrow img{width:76px;height:76px;object-fit:cover;border-radius:10px;background:#eceef3;flex:none;cursor:zoom-in}
 .phzoom{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);display:grid;place-items:center}.phzoom img{max-width:96vw;max-height:92vh;border-radius:12px}
 .card.inb{border:2px solid #ef6c1f}
+
+/* ===== YENGIL REJIM (eski telefonlar) ===== */
+html.lite *, html.lite *::before, html.lite *::after { animation: none !important; transition: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+html.lite #bg, html.lite #fx, html.lite #bannerCanvas, html.lite #vintro { display: none !important; }
+html.lite .card, html.lite button, html.lite .btn { box-shadow: none !important; }
+html.lite [data-a] { opacity: 1 !important; transform: none !important; }

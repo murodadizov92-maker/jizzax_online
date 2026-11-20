@@ -6,7 +6,11 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = v => Math.round(v).toLocaleString('ru-RU').replace(/,/g, ' ');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const REDUCE = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Yengil rejim: eski/kuchsiz telefonlarda animatsiya, video, 3D banner va xira (blur) effektlar o'chadi
+const LITE = (() => { try { const v = localStorage.getItem('lite'); if (v === '1' || v === '0') return v === '1';
+  const m = navigator.deviceMemory || 0, c = navigator.hardwareConcurrency || 0; return (m && m <= 2) || (c && c <= 2) || (m && m <= 3 && c && c <= 4); } catch (e) { return false; } })();
+document.documentElement.classList.toggle('lite', LITE);
+const REDUCE = LITE || matchMedia('(prefers-reduced-motion: reduce)').matches;
 const DEV = new URLSearchParams(location.search).get('dev');
 const APP = !DEV && !(tg && tg.initData);                  // Telegram'dan tashqari (APK yoki brauzer) — bot kodi bilan kirish
 const NATIVE = window.AndroidApp || null;                  // APK ichidagi Android ko'prigi (barmoq izi, orqaga tugmasi)
@@ -209,7 +213,7 @@ function createScene(canvas, intro) {
 /* ================================================================== kirish (intro) */
 let banner = null, introScene = null;
 // ochilish: eski kolbasa animatsiyasi o'rniga — kod/barmoq izidan keyin brend videosi (intro.mp4, ovozsiz)
-try { banner = window.createBanner ? createBanner($('#bannerCanvas'), () => S.products) : null; } catch (e) { banner = null; }
+try { banner = !LITE && window.createBanner ? createBanner($('#bannerCanvas'), () => S.products) : null; } catch (e) { banner = null; }
 const fullN = L => (L || []).map(p => p.full ? { ...p, sname: p.name, name: p.full } : p);   // Sales Doctor'dagi to'liq nom
 window.__bannerAdd = p => { S.cart[p.id] = (S.cart[p.id] || 0) + 1; saveCart(); toast('Savatga qo\'shildi'); };
 async function playIntro() {                     // ilova yuklanguncha qisqa och fon, keyin darrov kod oynasi
@@ -1219,6 +1223,7 @@ const SVG = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   finger: '<path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/>',
   lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
   text: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>',
@@ -1298,6 +1303,7 @@ async function profileView() {
     <div class="sec-h" data-a>Ko'rinish</div>
     <div class="card pf-list" data-a>
       <button type="button" class="pf-row" id="pfBig"><span class="pf-ic">${svg('text')}</span><span class="t">Katta yozuv<small>Yoshi kattalar uchun qulay</small></span><span class="sw ${big ? 'on' : ''}"></span></button>
+      <button type="button" class="pf-row" id="pfLite"><span class="pf-ic">${svg('zap')}</span><span class="t">Yengil rejim<small>Eski telefon qotsa — animatsiya va videolarsiz, tez ishlaydi</small></span><span class="sw ${LITE ? 'on' : ''}"></span></button>
       <button type="button" class="pf-row" id="pfOrders"><span class="pf-ic">${svg('list')}</span><span class="t">${SK ? 'Vozvrat va otkazlarim' : EK ? 'Otkazlarim' : 'Mening zakaslarim'}</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>
       ${me.admin ? `<button type="button" class="pf-row" id="pfAdmin"><span class="pf-ic">${svg('gear')}</span><span class="t">Admin sozlamalari</span><span style="color:#A2A4B6;display:flex;width:18px">${svg('chev')}</span></button>` : ''}
     </div>
@@ -1306,6 +1312,7 @@ async function profileView() {
   $$('.pf-row svg, .pf-out svg').forEach(s => { s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '2'); s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round'); s.style.width = s.style.height = '20px'; });
   $('#pfOrders').onclick = home;
   if ($('#pfAdmin')) $('#pfAdmin').onclick = adminView;
+  $('#pfLite').onclick = () => { localStorage.setItem('lite', LITE ? '0' : '1'); toast(LITE ? 'Oddiy rejim' : 'Yengil rejim yoqildi'); setTimeout(() => location.reload(), 500); };
   $('#pfBig').onclick = () => { const on = !document.body.classList.contains('big'); document.body.classList.toggle('big', on); LS.set('big', on ? '1' : '0'); const b = $('#aa'); if (b) b.textContent = on ? 'Aa −' : 'Aa +'; buzz(); profileView(); };
   $('#pfPin').onclick = () => {
     if (APP) return showLock(() => { toast("✅ Kod almashtirildi"); profileView(); }, 'set');
@@ -1439,3 +1446,20 @@ async function start() {
   }
 }
 start();
+
+/* iPhone: Safari'da ochilganda — «Bosh ekranga qo'shish» ko'rsatmasi (ilova kabi o'rnatiladi) */
+(function iosHint() {
+  try {
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = window.navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+    if (!ios || standalone || (tg && tg.initData) || localStorage.getItem('ios_hint_off')) return;
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:99999;background:#fff;color:#1f2330;border-radius:18px;padding:14px 16px;box-shadow:0 12px 40px rgba(0,0,0,.25);font:600 14px/1.45 "Plus Jakarta Sans",system-ui;display:flex;gap:12px;align-items:flex-start';
+    d.innerHTML = '<img src="/static/apple-touch-icon.png" style="width:44px;height:44px;border-radius:11px;flex:none">' +
+      '<div style="flex:1"><b style="font-size:15px">Ilovani o\'rnating</b><br>Pastdagi <b>Ulashish</b> tugmasini <span style="font-size:17px">⬆️</span> bosing, keyin <b>«На экран Домой»</b> (Add to Home Screen) ni tanlang.</div>' +
+      '<button style="border:0;background:#f1f2f6;border-radius:10px;width:30px;height:30px;font-size:16px;flex:none">✕</button>';
+    d.querySelector('button').onclick = () => { localStorage.setItem('ios_hint_off', '1'); d.remove(); };
+    const go = () => document.body.appendChild(d);
+    document.body ? setTimeout(go, 1500) : addEventListener('DOMContentLoaded', () => setTimeout(go, 1500));
+  } catch (e) { }
+})();
