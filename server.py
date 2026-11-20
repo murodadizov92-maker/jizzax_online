@@ -195,6 +195,18 @@ def guess_unit(p: dict, stock_unit: str = "") -> str:
     return "kg" if re.search(r"\b(вес|весов|ves|vesovoy)", (p.get("name") or "").lower()) else "dona"
 
 
+_GENERIC_CAT = {"", "boshqa", "прочие", "прочее", "другое", "boshqalar"}
+
+
+def _with_brand(p: dict) -> str:
+    """To'liq nom topilmasa: Sales Doctor tartibida brend qo'shiladi — «Охотничьи Колбаски в/у 150гр * HISLAT *»."""
+    name = (p.get("name") or "").strip()
+    cat = re.sub(r"\s+", " ", str(p.get("category") or "").replace("*", " ")).strip()
+    if not name or "*" in name or cat.lower() in _GENERIC_CAT:
+        return name
+    return "%s * %s *" % (name, cat)
+
+
 def annotate(items: list) -> list:
     idx = stock_index()
     meta = {r["pid"]: r["unit"] for r in db.execute("SELECT pid,unit FROM pmeta").fetchall()}
@@ -207,7 +219,7 @@ def annotate(items: list) -> list:
     for p in items:
         q = dict(p)
         row = amap.get(p["id"])
-        q["full"] = fulln.get(p["id"]) or (row["name"] if row else "") or p["name"]   # Sales Doctor'dagi to'liq nom
+        q["full"] = fulln.get(p["id"]) or (row["name"] if row else "") or _with_brand(p)   # Sales Doctor'dagi to'liq nom
         q["stock"] = row["qty"] if row else None
         q["stock_unit"] = (row["unit"] if row else "") or ""
         q["unit"] = meta.get(p["id"]) or guess_unit(p, q["stock_unit"])
@@ -1597,7 +1609,7 @@ def ret_items(raw: list, agent: str, catalog: dict, allow_price=False):
             if 0 <= pr <= 1e9:
                 price = pr
         unit = it.get("unit") if it.get("unit") in ("kg", "dona") else p["unit"]     # skladchi tanlagan birlik
-        items.append({"id": p["id"], "name": p["name"], "price": price, "qty": qty, "unit": unit})
+        items.append({"id": p["id"], "name": p.get("full") or p["name"], "price": price, "qty": qty, "unit": unit})
         total += price * qty
     return items, total
 
@@ -1750,7 +1762,7 @@ async def h_j_clients(request):
 async def h_j_products(request):
     _jarvis_ok(request)
     ptype, prices = agent_price_map(request.query.get("agent", ""))
-    items = [{"id": p["id"], "name": p["name"], "price": prices.get(p["id"], p["price"]), "unit": p["unit"]} for p in annotate(await get_products())]
+    items = [{"id": p["id"], "name": p.get("full") or p["name"], "price": prices.get(p["id"], p["price"]), "unit": p["unit"]} for p in annotate(await get_products())]
     return web.json_response({"items": items, "ptype": ptype})
 
 
