@@ -1162,7 +1162,7 @@ function adminView() {
       <div style="margin-top:10px;border-top:1px solid rgba(0,0,0,.08);padding-top:10px"><b style="font-size:14px">➕ ID bo'yicha qo'shish</b>
       <input id="nid" inputmode="numeric" placeholder="Telegram ID (masalan 7553654583)" style="margin-top:6px"><select id="nag" style="margin-top:6px;width:100%"></select>
       <button class="btn sec small" id="nadd" style="margin-top:8px">✅ Ruxsat berish</button></div></div>
-    <div class="card" data-a><b>💾 Ma'lumotlar zaxirasi</b><div class="mut" id="bk" style="margin-top:6px">...</div></div>
+    <div class="card" data-a><b>💾 Ma'lumotlar zaxirasi</b><div class="mut" id="bk" style="margin-top:6px">...</div><button class="btn" id="bkl" style="margin-top:10px">🗂 Nusxalar va tiklash</button><div id="bkx"></div></div>
     <div class="card" data-a><b>Mijozlar bazasi</b><div class="mut">Hozir: ${S.me.clients} ta. Sales Doctor Excel: ИД клиента, Название клиента, Агент, Территория</div>
       <input type="file" id="xl" accept=".xlsx" style="margin-top:8px"><button class="btn sec small" id="up" style="margin-top:8px">📥 Excel yuklash</button>
       <button class="btn small" id="clsd" style="margin-top:8px">🔄 Sales Doctor'dan yangilash</button><div class="mut" id="clsdt" style="margin-top:6px">Excel shart emas: ilova o'zi Sales Doctor'dan oladi va har 6 soatda yangilab turadi.</div></div>
@@ -1173,6 +1173,22 @@ function adminView() {
     <div class="card" data-a><b>Mahsulotlarni yangilash</b><div class="mut">Narx/rasm zakas bot'dan avtomatik olinadi (har ~45 soniyada).</div><button class="btn sec small" id="sync" style="margin-top:8px">🔄 Hozir yangilash</button></div>`);
   loadUsers();
   { const b = $('#clsd'); if (b) b.onclick = async () => { b.disabled = true; $('#clsdt').textContent = '⏳ Olinmoqda...'; try { const r = await api('/api/clients/sync', { method: 'POST' }); $('#clsdt').innerHTML = r.ok ? `✅ Topildi ${r.total} · yangi ${r.added} · yangilandi ${r.updated}` + (r.skipped_other_agents ? ` · boshqa agent ${r.skipped_other_agents} (o'tkazib yuborildi)` : '') + (r.no_agent ? ` · agentsiz ${r.no_agent}` : '') + (r.sample ? `<br><small style="word-break:break-all">Namuna: ${esc(r.sample)}</small>` : '') : '❌ ' + r.error; } catch (e) { $('#clsdt').textContent = '❌ ' + e.message; } b.disabled = false; }; }
+  const bkl = $('#bkl'); if (bkl) bkl.onclick = async () => {
+    const x = $('#bkx'); x.innerHTML = '<div class="mut" style="margin-top:8px">⏳ Nusxalar o\'qilmoqda…</div>';
+    try {
+      const r = await api('/api/backups'), nw = r.now || {};
+      x.innerHTML = '<div class="mut" style="margin:10px 0 6px">Hozir: mijoz ' + nw.clients + ' · zakas ' + nw.orders + ' · vozvrat ' + nw.returns + ' · otkaz ' + nw.otkaz + '</div>' +
+        r.items.map(i => '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #eee"><div><b>' + esc(i.ts) + '</b>' + (i.slot >= 100 ? ' <span class="mut">(kunlik)</span>' : '') +
+          '<div class="mut" style="font-size:12px">mijoz ' + i.clients + ' · zakas ' + i.orders + ' · vozvrat ' + i.returns + ' · otkaz ' + i.otkaz + ' · ' + Math.round(i.size / 1024) + ' KB</div></div>' +
+          '<button class="btn" data-rs="' + i.slot + '" data-ts="' + esc(i.ts) + '" style="flex:none">↩ Tiklash</button></div>').join('');
+      x.querySelectorAll('[data-rs]').forEach(b => b.onclick = async () => {
+        if (!confirm(b.dataset.ts + ' holatiga qaytarilsinmi? Undan keyin kiritilgan ma\'lumotlar o\'chadi.')) return;
+        b.disabled = true; b.textContent = '⏳';
+        try { await api('/api/backup/restore', { method: 'POST', json: { slot: +b.dataset.rs } }); toast('✅ Tiklandi'); setTimeout(() => location.reload(), 800); }
+        catch (e) { toast(e.message); b.disabled = false; b.textContent = '↩ Tiklash'; }
+      });
+    } catch (e) { x.innerHTML = '<div class="mut">❌ ' + esc(e.message) + '</div>'; }
+  };
   api('/api/backup').then(b => { const e = $('#bk'); if (!e) return; e.innerHTML = !b.enabled ? '⚠️ DATABASE_URL yo\'q — zaxira ishlamayapti, deploydan keyin ma\'lumot yo\'qoladi' : b.ok === false ? '❌ Xato: ' + esc(b.error) : b.ok ? '✅ Saqlanmoqda (' + Math.round(b.size / 1024) + ' KB)' + (b.boot === 'restored' ? ' · oxirgi deployda tiklandi' : '') : '⏳ Birinchi nusxa kutilmoqda'; }).catch(() => {});
   $('#up').onclick = async () => {
     const f = $('#xl').files[0]; if (!f) return toast('Fayl tanlang');
