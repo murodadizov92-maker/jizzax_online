@@ -64,74 +64,78 @@ import persist
 PERSIST = persist.restore(DATABASE_URL, DB_PATH)   # deploydan keyin baza bo'sh bo'lsa — Postgres nusxasidan tiklanadi
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
-db.executescript(
+def _schema():
+    db.executescript(
+        """
+    CREATE TABLE IF NOT EXISTS users(
+      tg_id INTEGER PRIMARY KEY, name TEXT, username TEXT, region TEXT,
+      created INTEGER, last_seen INTEGER);
+    CREATE TABLE IF NOT EXISTS clients(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ext_id TEXT UNIQUE, name TEXT, phone TEXT, region TEXT,
+      address TEXT, agent TEXT DEFAULT '', search TEXT);
+    CREATE INDEX IF NOT EXISTS idx_clients_region ON clients(region);
+    CREATE TABLE IF NOT EXISTS orders(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT,
+      client_id INTEGER, client_name TEXT, region TEXT, items TEXT, total REAL,
+      status TEXT DEFAULT 'new', comment TEXT, created INTEGER, updated INTEGER);
+    CREATE TABLE IF NOT EXISTS stock(
+      key TEXT PRIMARY KEY, name TEXT, qty REAL, unit TEXT DEFAULT '', src TEXT, updated INTEGER);
+    CREATE TABLE IF NOT EXISTS pmeta(pid TEXT PRIMARY KEY, unit TEXT);
+    CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+    CREATE TABLE IF NOT EXISTS eksp_link(login TEXT PRIMARY KEY, exp TEXT, agents TEXT, ptypes TEXT, updated INTEGER);
+    CREATE TABLE IF NOT EXISTS eksp_acts(id INTEGER PRIMARY KEY AUTOINCREMENT, oid INTEGER, kind TEXT, amount REAL DEFAULT 0, pay TEXT,
+      note TEXT, uid INTEGER, user TEXT, exp TEXT, client TEXT, created INTEGER, done INTEGER DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS app_tokens(th TEXT PRIMARY KEY, tg_id INTEGER, created INTEGER, last_used INTEGER, device TEXT);
+    CREATE TABLE IF NOT EXISTS app_logins(login TEXT PRIMARY KEY, pw TEXT, tg_id INTEGER UNIQUE, created INTEGER);
+    CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, kind TEXT, title TEXT, body TEXT, order_id INTEGER, created INTEGER, read INTEGER DEFAULT 0);
+    CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(tg_id, id);
+    CREATE TABLE IF NOT EXISTS access(tg_id INTEGER PRIMARY KEY, agent TEXT NOT NULL, added INTEGER);
+    CREATE TABLE IF NOT EXISTS mc_sections(login TEXT PRIMARY KEY, secs TEXT);
+    CREATE TABLE IF NOT EXISTS returns(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT, agent TEXT, ptype TEXT DEFAULT '',
+      client_id INTEGER DEFAULT 0, client_name TEXT, client_typed TEXT, items TEXT, total REAL, photos TEXT DEFAULT '[]',
+      comment TEXT DEFAULT '', status TEXT DEFAULT 'pending', reason TEXT DEFAULT '', approved_by TEXT DEFAULT '',
+      created INTEGER, updated INTEGER, approved_at INTEGER DEFAULT 0, printed_at INTEGER DEFAULT 0, req_id TEXT DEFAULT '');
+    CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status, id);
+    CREATE TABLE IF NOT EXISTS otkaz(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT, client_name TEXT, order_no TEXT,
+      photos TEXT DEFAULT '[]', comment TEXT DEFAULT '', created INTEGER, seen_at INTEGER DEFAULT 0, sent INTEGER DEFAULT 0, req_id TEXT DEFAULT '');
+    CREATE TABLE IF NOT EXISTS agent_prices(agent TEXT PRIMARY KEY, ptype TEXT, prices TEXT, updated INTEGER);
     """
-CREATE TABLE IF NOT EXISTS users(
-  tg_id INTEGER PRIMARY KEY, name TEXT, username TEXT, region TEXT,
-  created INTEGER, last_seen INTEGER);
-CREATE TABLE IF NOT EXISTS clients(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, ext_id TEXT UNIQUE, name TEXT, phone TEXT, region TEXT,
-  address TEXT, agent TEXT DEFAULT '', search TEXT);
-CREATE INDEX IF NOT EXISTS idx_clients_region ON clients(region);
-CREATE TABLE IF NOT EXISTS orders(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT,
-  client_id INTEGER, client_name TEXT, region TEXT, items TEXT, total REAL,
-  status TEXT DEFAULT 'new', comment TEXT, created INTEGER, updated INTEGER);
-CREATE TABLE IF NOT EXISTS stock(
-  key TEXT PRIMARY KEY, name TEXT, qty REAL, unit TEXT DEFAULT '', src TEXT, updated INTEGER);
-CREATE TABLE IF NOT EXISTS pmeta(pid TEXT PRIMARY KEY, unit TEXT);
-CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
-CREATE TABLE IF NOT EXISTS eksp_link(login TEXT PRIMARY KEY, exp TEXT, agents TEXT, ptypes TEXT, updated INTEGER);
-CREATE TABLE IF NOT EXISTS eksp_acts(id INTEGER PRIMARY KEY AUTOINCREMENT, oid INTEGER, kind TEXT, amount REAL DEFAULT 0, pay TEXT,
-  note TEXT, uid INTEGER, user TEXT, exp TEXT, client TEXT, created INTEGER, done INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS app_tokens(th TEXT PRIMARY KEY, tg_id INTEGER, created INTEGER, last_used INTEGER, device TEXT);
-CREATE TABLE IF NOT EXISTS app_logins(login TEXT PRIMARY KEY, pw TEXT, tg_id INTEGER UNIQUE, created INTEGER);
-CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, kind TEXT, title TEXT, body TEXT, order_id INTEGER, created INTEGER, read INTEGER DEFAULT 0);
-CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(tg_id, id);
-CREATE TABLE IF NOT EXISTS access(tg_id INTEGER PRIMARY KEY, agent TEXT NOT NULL, added INTEGER);
-CREATE TABLE IF NOT EXISTS mc_sections(login TEXT PRIMARY KEY, secs TEXT);
-CREATE TABLE IF NOT EXISTS returns(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT, agent TEXT, ptype TEXT DEFAULT '',
-  client_id INTEGER DEFAULT 0, client_name TEXT, client_typed TEXT, items TEXT, total REAL, photos TEXT DEFAULT '[]',
-  comment TEXT DEFAULT '', status TEXT DEFAULT 'pending', reason TEXT DEFAULT '', approved_by TEXT DEFAULT '',
-  created INTEGER, updated INTEGER, approved_at INTEGER DEFAULT 0, printed_at INTEGER DEFAULT 0, req_id TEXT DEFAULT '');
-CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status, id);
-CREATE TABLE IF NOT EXISTS otkaz(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER, user_name TEXT, client_name TEXT, order_no TEXT,
-  photos TEXT DEFAULT '[]', comment TEXT DEFAULT '', created INTEGER, seen_at INTEGER DEFAULT 0, sent INTEGER DEFAULT 0, req_id TEXT DEFAULT '');
-CREATE TABLE IF NOT EXISTS agent_prices(agent TEXT PRIMARY KEY, ptype TEXT, prices TEXT, updated INTEGER);
-"""
-)
-for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
-             "ALTER TABLE clients ADD COLUMN added_by INTEGER DEFAULT 0",   # ilovada qo'lda qo'shilgan mijoz (kim qo'shgan)
-             "ALTER TABLE clients ADD COLUMN added_at INTEGER DEFAULT 0",
-             "ALTER TABLE orders ADD COLUMN printed_at INTEGER DEFAULT 0",
-             "ALTER TABLE returns ADD COLUMN paid_at INTEGER DEFAULT 0",        # SD'da balansdan ayirildi (Возврат с полки)
-             "ALTER TABLE orders ADD COLUMN req_id TEXT DEFAULT ''",
-             "ALTER TABLE clients ADD COLUMN balance REAL",                   # Jarvis'dan: mijoz balansi (manfiy = qarz)
-             "ALTER TABLE clients ADD COLUMN bal_t INTEGER DEFAULT 0",
-             # ekspeditor -> skladchi -> admin zanjiri (vozvrat va otkaz)
-             "ALTER TABLE returns ADD COLUMN eksp_uid INTEGER DEFAULT 0",
-             "ALTER TABLE returns ADD COLUMN eksp_name TEXT DEFAULT ''",
-             "ALTER TABLE returns ADD COLUMN eksp_photos TEXT DEFAULT '[]'",
-             "ALTER TABLE returns ADD COLUMN accepted_at INTEGER DEFAULT 0",
-             "ALTER TABLE returns ADD COLUMN accepted_by TEXT DEFAULT ''",
-             "ALTER TABLE returns ADD COLUMN sklad_uid INTEGER DEFAULT 0",
-             "ALTER TABLE otkaz ADD COLUMN status TEXT DEFAULT 'sent'",
-             "ALTER TABLE otkaz ADD COLUMN eksp_uid INTEGER DEFAULT 0",
-             "ALTER TABLE otkaz ADD COLUMN nakl TEXT DEFAULT '[]'",
-             "ALTER TABLE otkaz ADD COLUMN accepted_at INTEGER DEFAULT 0",
-             "ALTER TABLE otkaz ADD COLUMN accepted_by TEXT DEFAULT ''",
-             "ALTER TABLE otkaz ADD COLUMN sklad_uid INTEGER DEFAULT 0",
-             "ALTER TABLE otkaz ADD COLUMN approved_at INTEGER DEFAULT 0",
-             "ALTER TABLE otkaz ADD COLUMN approved_by TEXT DEFAULT ''",
-             "ALTER TABLE otkaz ADD COLUMN reason TEXT DEFAULT ''",
-             "ALTER TABLE eksp_link ADD COLUMN data TEXT DEFAULT ''"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
-    try:
-        db.execute(_sql)
-    except sqlite3.OperationalError:
-        pass
-db.commit()
+    )
+    for _sql in ("ALTER TABLE orders ADD COLUMN ddate TEXT DEFAULT ''",
+                 "ALTER TABLE clients ADD COLUMN added_by INTEGER DEFAULT 0",   # ilovada qo'lda qo'shilgan mijoz (kim qo'shgan)
+                 "ALTER TABLE clients ADD COLUMN added_at INTEGER DEFAULT 0",
+                 "ALTER TABLE orders ADD COLUMN printed_at INTEGER DEFAULT 0",
+                 "ALTER TABLE returns ADD COLUMN paid_at INTEGER DEFAULT 0",        # SD'da balansdan ayirildi (Возврат с полки)
+                 "ALTER TABLE orders ADD COLUMN req_id TEXT DEFAULT ''",
+                 "ALTER TABLE clients ADD COLUMN balance REAL",                   # Jarvis'dan: mijoz balansi (manfiy = qarz)
+                 "ALTER TABLE clients ADD COLUMN bal_t INTEGER DEFAULT 0",
+                 # ekspeditor -> skladchi -> admin zanjiri (vozvrat va otkaz)
+                 "ALTER TABLE returns ADD COLUMN eksp_uid INTEGER DEFAULT 0",
+                 "ALTER TABLE returns ADD COLUMN eksp_name TEXT DEFAULT ''",
+                 "ALTER TABLE returns ADD COLUMN eksp_photos TEXT DEFAULT '[]'",
+                 "ALTER TABLE returns ADD COLUMN accepted_at INTEGER DEFAULT 0",
+                 "ALTER TABLE returns ADD COLUMN accepted_by TEXT DEFAULT ''",
+                 "ALTER TABLE returns ADD COLUMN sklad_uid INTEGER DEFAULT 0",
+                 "ALTER TABLE otkaz ADD COLUMN status TEXT DEFAULT 'sent'",
+                 "ALTER TABLE otkaz ADD COLUMN eksp_uid INTEGER DEFAULT 0",
+                 "ALTER TABLE otkaz ADD COLUMN nakl TEXT DEFAULT '[]'",
+                 "ALTER TABLE otkaz ADD COLUMN accepted_at INTEGER DEFAULT 0",
+                 "ALTER TABLE otkaz ADD COLUMN accepted_by TEXT DEFAULT ''",
+                 "ALTER TABLE otkaz ADD COLUMN sklad_uid INTEGER DEFAULT 0",
+                 "ALTER TABLE otkaz ADD COLUMN approved_at INTEGER DEFAULT 0",
+                 "ALTER TABLE otkaz ADD COLUMN approved_by TEXT DEFAULT ''",
+                 "ALTER TABLE otkaz ADD COLUMN reason TEXT DEFAULT ''",
+                 "ALTER TABLE eksp_link ADD COLUMN data TEXT DEFAULT ''"):        # takroriy yuborishdan himoya   # Jarvis'da chop etilgan vaqt
+        try:
+            db.execute(_sql)
+        except sqlite3.OperationalError:
+            pass
+    db.commit()
+
+
+_schema()
 
 
 # ---------------------------------------------------------------- SKLAD (ostatka)
@@ -1088,6 +1092,26 @@ async def h_products(request):
 async def h_backup(request):
     need_admin(request)
     return web.json_response({"enabled": bool(DATABASE_URL), "boot": PERSIST, **persist.status()})
+
+
+async def h_backups(request):
+    need_admin(request)
+    if not DATABASE_URL:
+        return web.json_response({"items": []})
+    return web.json_response({"items": await persist.list_slots(DATABASE_URL),
+                              "now": {t: db.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in ("clients", "orders", "returns", "otkaz")}})
+
+
+async def h_restore(request):
+    need_admin(request)
+    d = await request.json()
+    n = await persist.restore_slot(DATABASE_URL, db, int(d.get("slot")))
+    _schema()
+    try:
+        _cache["t"] = 0
+    except Exception:
+        pass
+    return web.json_response({"ok": True, "n": n})
 
 
 # ---------------------------------------------------------------- JARVIS (kompyuterdagi ilova: zakaslarni chop etish)
@@ -2695,6 +2719,8 @@ def make_app():
         web.get("/api/products", h_products),
         web.put("/api/products/{id}/unit", h_unit),
         web.get("/api/backup", h_backup),
+        web.get("/api/backups", h_backups),
+        web.post("/api/backup/restore", h_restore),
         web.get("/jarvis/orders", h_jarvis_orders),
         web.get("/jarvis/invoice/{id}.jpg", h_jarvis_invoice),
         web.post("/jarvis/printed", h_jarvis_printed),

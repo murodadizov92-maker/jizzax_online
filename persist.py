@@ -12,7 +12,7 @@ from pathlib import Path
 
 log = logging.getLogger("persist")
 TABLE = "oz_backup"
-_state = {"changes": -1, "slot": 0, "ok": None, "ts": "", "size": 0, "error": "", "boot": ""}
+_state = {"changes": -1, "slot": 0, "ok": None, "ts": "", "size": 0, "error": "", "boot": "", "best_n": 0, "hold": False}
 
 DDL = f"CREATE TABLE IF NOT EXISTS {TABLE}(slot INT PRIMARY KEY, data BYTEA, ts TIMESTAMPTZ DEFAULT now(), size INT)"
 
@@ -112,6 +112,14 @@ async def backup(url: str, db, force=False):
         n = db.execute("SELECT (SELECT COUNT(*) FROM clients)+(SELECT COUNT(*) FROM orders)+(SELECT COUNT(*) FROM access)").fetchone()[0]
         if n == 0:
             return False
+        if _state.get("hold"):                        # admin tiklashni tanlaguncha nusxalar ustiga yozilmaydi
+            return False
+        best = _state.get("best_n") or 0
+        if best > 50 and n < best * 0.5:              # ma'lumot birdan yarmidan ko'proq kamaydi — yaxshi nusxani buzmaymiz
+            _state.update(ok=False, hold=True, error="Baza birdan kamayib ketdi (%d → %d). Zaxira to'xtatildi — Admin'da nusxadan tiklang." % (best, n))
+            log.error(_state["error"])
+            return False
+        _state["best_n"] = max(best, n)
         changes = db.total_changes
         blob = _snapshot(db)
         c = await _conn(url)
@@ -142,3 +150,57 @@ async def loop(url: str, db, every=20):
 
 def status():
     return dict(_state)
+
+
+def _counts(blob: bytes) -> dict:
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    try:
+        Path(tmp.name).write_bytes(zlib.decompress(bytes(blob)))
+        c = sqlite3.connect(tmp.name)
+        out = {}
+        for t in ("clients", "orders", "returns", "otkaz", "access", "kv"):
+            try:
+                out[t] = c.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0]
+            except Exception:
+                out[t] = None
+        c.close()
+        return out
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+async def list_slots(url):
+    c = await _conn(url)
+    try:
+        await c.execute(DDL)
+        rows = await c.fetch(f"SELECT slot, ts, size, data FROM {TABLE} WHERE data IS NOT NULL ORDER BY ts DESC")
+    finally:
+        await c.close()
+    out = []
+    for r in rows:
+        try:
+            cnt = _counts(r["data"])
+        except Exception as e:
+            cnt = {"xato": str(e)[:80]}
+        out.append({"slot": r["slot"], "ts": r["ts"].astimezone(_dt.timezone(_dt.timedelta(hours=5))).strftime("%Y-%m-%d %H:%M"),
+                    "size": r["size"], **cnt})
+    return out
+
+
+async def restore_slot(url, db, slot: int):
+    c = await _conn(url)
+    try:
+        row = await c.fetchrow(f"SELECT data FROM {TABLE} WHERE slot=$1", int(slot))
+    finally:
+        await c.close()
+    if not row or not row["data"]:
+        raise RuntimeError("Bu nusxa topilmadi")
+    _restore_live(db, row["data"])
+    n = db.execute("SELECT (SELECT COUNT(*) FROM clients)+(SELECT COUNT(*) FROM orders)+(SELECT COUNT(*) FROM access)").fetchone()[0]
+    _state.update(hold=False, best_n=n, changes=-1, ok=None, error="", boot="restored-manual")
+    await backup(url, db, force=True)                 # tiklangan holat darhol asosiy nusxaga yoziladi
+    return n
